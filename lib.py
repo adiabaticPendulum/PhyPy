@@ -1,6 +1,9 @@
 # ONLY CHANGE STUFF IN THIS SECTION, NOT IN THE OTHER SECTIONS. SET GLOBAL CONTENTS AND SETTINGS HERE
 __debug_lib__ = __debug__  # Weather to show warnings and debug info. Default: __debug__. Change this to False, if you want to hide the librarys internal debug information, even when you debug your application
 __debug_extended__ = True  # Weather to show internal debug info (mainly for debugging the library itself).
+
+import pandas
+
 DEC_DGTS = 128  # How many decimal digits (without rounding errors) shall be used.
 
 #################################################################################################
@@ -83,8 +86,24 @@ def indexOf(arr, start=0):
     return range(start, len(arr))
 
 
+def to_var(var, modify=lambda var: var):
+    try:
+        return dc.Decimal(modify(var))
+    except dc.InvalidOperation:
+        return str(var)
+
+
 #####################################################################
 # Datasets and Data-Handling
+
+class Var:#Todo: document!
+    def __init__(self, val):
+        self.var = dc.Decimal(val)
+
+    def get(self):
+        return self.var
+
+
 class Dataset:  # Object representing a full Dataset
     frame = pd.DataFrame()
 
@@ -157,6 +176,37 @@ class Dataset:  # Object representing a full Dataset
 
     def disp_row(self, indices):
         print(self.frame.loc[indices])
+
+    def from_csv(self, path, delimiter=None, c_labels_from_row=0, c_labels=None, indices_from_row=None, usecols=None,
+                 userows=None, NaN_alias="NaN", compression=None, strict=False, modify_cols={}, modify_rows={}):
+        #TODO: TEST
+
+
+        temp = pandas.read_csv(filepath_or_buffer=path, sep=delimiter, header=c_labels_from_row, names=c_labels,
+                               index_col=indices_from_row, na_values=NaN_alias, na_filter=True,
+                               verbose=__debug_extended__, compression=compression, quotechar="\"", comment="#",
+                               on_bad_lines='error' if strict else 'warn', dtype=object)
+
+        shp = temp.shape
+        for r in range(shp[0]):
+            for c in range(shp[1]):
+                temp.loc[r][c] = to_var(temp.loc[r][c])
+
+        for k in modify_cols.keys():
+            for i in indexOf(temp.get[k]):
+                temp.get[k][i] = modify_rows[k](temp.get[k][i])
+
+        for k in modify_rows.keys():
+            for i in indexOf(temp.loc[k]):
+                temp.loc[k][i] = modify_rows[k](temp.loc[k][i])
+
+        if userows is not None:
+            userows = range(shp[0])
+        if usecols is not None:
+            usecols = range(shp[1])
+
+        temp = temp[[col for col in usecols]]
+        self.frame = temp.loc[userows]
     # def disp(self):
 
 

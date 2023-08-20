@@ -1,6 +1,11 @@
 # PhyPy (Pre-Alpha)
 A library based on Pandas, Numpy and Matplotlib to facilitated Physics Labs at the University and evaluation of experimental results in general.
 
+**NOTE**: Be aware that most of this is not that advanced. In fact, most of it are just some handy presets, shortcuts and small modifications, mostly designed to suit my personal needs and preferences.
+There might be only small advantages over using matplotlib and pandas alone, so you might want to consider that instead. I might this library, to facilitate some work for specific use-cases (University physics labs).
+While the result might be a little bit easier to use (if you understand this documentation, which probably isn't even up-to-date), however, it is certainly less versatile, less performant, less reliable, less safe and 
+may lack some features. If you want to use this nevertheless, welcome aboard. 
+
 This is a personal projects, no further support, bug fixing or continuation is guaranteed whatsoever.
 
 # Documentation
@@ -56,19 +61,50 @@ Returns a row of the Dataset as a Pandas Series.
 
 **Parameters:**
 
-`indices`: List of indices of the rows to return. 
+`indices`: List of indices or labels of the rows to return. 
 
 **Returns:**
 
 Pandas Series representation of the rows with indices specified in `indices`
 
-### _function_ `Dataset.disp_row(indices: _List_)`
+### _function_ <code>Dataset.disp_row(indices: _List_)</code>
 
 Prints a row of the Dataset.
 
 **Parameters:**
 
-`indices`: List of indices of the rows to print. 
+`indices`: List of indices or labels of the rows to print. 
+
+
+### _function_ <code>from_csv(path: _str_, delimiter: _str (length 1)_ (optional), c_labels_from_row: _int_ (optional), c_labels: _list of int_ (optional), indices_from_row _list of int_ (optional), usecols: _list of int_ (optional), userows: _list of int_ (optional), NaN_alias: _list of str_ (optional), compression: _str_, strict: _Boolean_, modify_cols: _dict_, modify_rows: _dict_)</code>
+    
+Initializes the Dataset from a `.csv`-file.
+
+**Parameters:**
+
+`path`: str that specifies the path to the `.csv`-file to be read 
+
+`delimiter` _(optional)_: Regex that specifies the delimiter to use when reading the file. Default: `None` (uses Pandas/native Python features to auto-detect the delimiter)
+
+`c_labels_from_row` _(optional)_: int, index of row to use as column-labels. Default: `0`
+
+`c_labels` _(optional)_: List of str to use as column-labels (overriding the ones from `c_labels_from_row`) Default: None (don't override existing labels)
+
+`indices_from_row` _(optional)_: int, index of row to use as column-labels. Default: `None` (use standard-indices)
+
+`usecols` _(optional)_: List of int, column-indices or -labels to read into Dataset. Default: `None` (use all columns)
+
+`userows` _(optional)_: List of int, row-indices or -labels to read into Dataset. Default: `None` (use all rows)
+
+`NaN_alias` _(optional)_: scalar, str or dict of additional entries to interpret as NaN. Default: `"NaN"`
+
+`compression` _(optional)_: str, compression of the file to be read (e.g. "zip"). Default: `None`
+
+`strict` _(optional)_: Weather to raise error for too long/short rows. If False, trims them and raises a warning. Default: False
+
+`modify_cols` _(optional)_: Dict of functions to modify all values in column with corresponding key as label. The Items must have form `"<COLUMN-LABEL>": _function(entry)_`, where `_function(entry)_` has return-type `type(entry)`. Default: `{}`
+
+`modify_rows` _(optional)_: Dict of functions to modify all values in column with corresponding key as label/index. The Items must have form `"<ROW-INDEX OR -LABEL>": _function(entry)_`, where `_function(entry)_` has return-type `type(entry)`. Default: `{}`
 
 
 ## Functions:
@@ -76,11 +112,11 @@ Prints a row of the Dataset.
 ### _function_ motivateMe()
 Use this, if you need motivation
 
-### _function_ indexOf(arr: _List_)
+### _function_ <code>indexOf(arr: _List_)</code>
 **Parameters:**
 
 _List_ `arr`:
 
 List to return the indices of
 
-**Returns**: Array containing all list indices. Equivalent to range(len(arr))
+**Returns**: List containing all list indices. Equivalent to range(len(arr))
