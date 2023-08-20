@@ -6,7 +6,8 @@ There might be only small advantages over using matplotlib and pandas alone, so 
 While the result might be a little bit easier to use (if you understand this documentation, which probably isn't even up-to-date), however, it is certainly less versatile, less performant, less reliable, less safe and 
 may lack some features. If you want to use this nevertheless, welcome aboard. 
 
-This is a personal projects, no further support, bug fixing or continuation is guaranteed whatsoever.
+This is a personal projects (I'm an undergrad physics student, I do this 
+first and foremost to facilitate my own work. I'm no professional software-dev.), no further support, bug fixing or continuation is guaranteed whatsoever.
 
 # Documentation
 
