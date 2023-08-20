@@ -47,7 +47,8 @@ def _warn(name, description):
 
 def _error(name, description):
     print(
-        "\n" + ESC_STYLES["Error"] + "Error: " + name + ESC_STYLES["Default"] + " " + ESC_STYLES["Error_txt"] + description +
+        "\n" + ESC_STYLES["Error"] + "Error: " + name + ESC_STYLES["Default"] + " " + ESC_STYLES[
+            "Error_txt"] + description +
         ESC_STYLES["Default"] + "\n")
 
 
@@ -78,7 +79,7 @@ def motivate_me():  # Use GPT-2 to generate and show a motivational text to conv
 
 ######################################################################
 # Misc
-def indexOf(arr, start = 0):
+def indexOf(arr, start=0):
     return range(start, len(arr))
 
 
@@ -87,7 +88,7 @@ def indexOf(arr, start = 0):
 class Dataset:  # Object representing a full Dataset
     frame = pd.DataFrame()
 
-    def from_dictionary(self, dictionary,
+    def from_dictionary(self, dictionary, r_labels=None,
                         items=None):  # Initialize the Dataset with a Python dictionary. Parameters: dictionary: The dictionary of lists to read the data from. items (otional): Which items (lists) of the dictionary to use. Default is 'None', which will use all items.
         data = {}
         if items == None:
@@ -99,51 +100,63 @@ class Dataset:  # Object representing a full Dataset
             _error("Type Error",
                    "Parameter 'dictionary' must be of Type <class 'dict'>, but has type " + str(type(dictionary)))
             return -1
-        self.frame = pd.DataFrame(dictionary)
+        if r_labels is not None:
+            self.frame = pd.DataFrame(dictionary, r_labels)
+        else:
+            self.frame = pd.DataFrame(dictionary)
 
-    def from_lists(self, lists, labels=None, strict=False):
-        # TODO: Add support for lists with different lengths
-        if len(lists) != len(labels):
+    def from_lists(self, lists, r_labels=None, c_labels=None, strict=False):
+        if len(lists) != len(c_labels):
             if strict:
-                _error("Parameter Length Missmatch", "Parameters 'lists' and 'labels' must have the same length but "
+                _error("Parameter Length Missmatch", "Parameters 'lists' and 'c_labels' must have the same length but "
                                                      "have shapes (" + str(len(lists)) + ") and ("
-                       + str(len(labels)) + ").")
+                       + str(len(c_labels)) + ").")
                 return -1
             if __debug_lib__:
-                _warn("Parameter Length Missmatch", "Parameters 'lists' and 'labels' must have the same length but "
-                                                    "have shapes (" + str(len(lists)) + ") and (" + str(len(labels)) +
-                      "). Missing labels will be initialized with standard indices, missing lists with all 'None'.")
-            while len(labels) < len(lists):
-                labels.append(len(labels) - 1)
-            while len(lists) < len(labels):
+                _warn("Parameter Length Missmatch", "Parameters 'lists' and 'c_labels' must have the same length but "
+                                                    "have shapes (" + str(len(lists)) + ") and (" + str(len(c_labels)) +
+                      "). Missing c_labels will be initialized with standard indices, missing lists with all 'None'.")
+            while len(c_labels) < len(lists):
+                c_labels.append(len(c_labels) - 1)
+            while len(lists) < len(c_labels):
                 lists.append([None for i in lists[0]])
         try:
             data = {}
-            for i in indexOf(labels):
-                data[labels[i]] = lists[i]
+            for i in indexOf(c_labels):
+                data[c_labels[i]] = lists[i]
             self.frame = pd.DataFrame(data)
         except ValueError:
             max_len = len(lists[0])
-
             for i in indexOf(lists, start=1):
-                if len(lists[i]) != len(lists[i-1]):
+                if len(lists[i]) != len(lists[i - 1]):
                     if strict:
-                        _error("ValueError", "All items in 'lists' must have same dimension, but items at Indices " + str(i-1) + " and " + str(i) + " have shapes (" + str(len(lists[i-1])) + ") and (" + str(len(lists[i])) + ").")
+                        _error("ValueError",
+                               "All items in 'lists' must have same dimension, but items at Indices " + str(
+                                   i - 1) + " and " + str(i) + " have shapes (" + str(
+                                   len(lists[i - 1])) + ") and (" + str(len(lists[i])) + ").")
                         return -1
-                    _warn("ValueWarning", "All items in 'lists' must have same dimension, but items at Indices " + str(i-1) + " and " + str(i) + " have shapes (" + str(len(lists[i - 1])) + ") and (" + str(len(lists[i])) + "). Short items will be filled with 'NaN' of type dc.Decimal")
-                    max_len = np.max([len(lists[i]), len(lists[i-1]), max_len])
+                    _warn("ValueWarning", "All items in 'lists' must have same dimension, but items at Indices " + str(
+                        i - 1) + " and " + str(i) + " have shapes (" + str(len(lists[i - 1])) + ") and (" + str(
+                        len(lists[i])) + "). Short items will be filled with 'NaN' of type dc.Decimal")
+                    max_len = np.max([len(lists[i]), len(lists[i - 1]), max_len])
                     if __debug_extended__:
                         print("Maximal detected list-length:", max_len)
-
             for i in indexOf(lists):
                 while len(lists[i]) < max_len:
                     lists[i].append(dc.Decimal('NaN'))
-
         data = {}
-        for i in indexOf(labels):
-            data[labels[i]] = lists[i]
-        self.frame = pd.DataFrame(data)
+        for i in indexOf(c_labels):
+            data[c_labels[i]] = lists[i]
+        if r_labels is not None:
+            self.frame = pd.DataFrame(data, r_labels)
+        else:
+            self.frame = pd.DataFrame(data)
 
+    def row(self, indices):
+        return self.frame.loc[indices]
+
+    def disp_row(self, indices):
+        print(self.frame.loc[indices])
     # def disp(self):
 
 
@@ -153,7 +166,9 @@ ds = Dataset()
 print(ds.frame)
 
 ds.from_lists([[1, 2], [3, 4], [5, 6, 7]], ["a", "b", "c"])
-print(ds.frame)
+print("row 2:", type(ds.row(2)), "\n\n")
+print("rows 1, 2:")
+ds.disp_row([1, 2])
 
 ###################################################################################################
 # Best motivateMe() texts:
