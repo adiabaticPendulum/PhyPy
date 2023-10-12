@@ -2,8 +2,6 @@
 __debug_lib__ = __debug__  # Weather to show warnings and debug info. Default: __debug__. Change this to False, if you want to hide the librarys internal debug information, even when you debug your application
 __debug_extended__ = True  # Weather to show internal debug info (mainly for debugging the library itself).
 
-import pandas
-
 DEC_DGTS = 128  # How many decimal digits (without rounding errors) shall be used.
 
 #################################################################################################
@@ -13,13 +11,14 @@ ESC_STYLES = {"Error": '\033[41m\033[30m', "Error_txt": '\033[0m\033[31m', "Warn
 
 import asyncio
 import math as mt
+import decimal as dc
+import copy as cpy
 import pyppeteer as pt
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import decimal as dc
 
-libs = [asyncio, mt, pt, plt, np, pd, dc]
+libs = [asyncio, mt, pt, plt, np, pd, dc, cpy]
 
 if DEC_DGTS <= dc.MAX_PREC:
     dc.getcontext().prec = DEC_DGTS
@@ -96,12 +95,70 @@ def to_var(var, modify=lambda var: var):
 #####################################################################
 # Datasets and Data-Handling
 
-class Var:#Todo: document!
-    def __init__(self, val):
-        self.var = dc.Decimal(val)
+class Var:  # Todo: document!
+
+    def __init__(self, val, err="NaN"):
+        self._var = dc.Decimal(val)
+        self._err = dc.Decimal(err)
+        self._known_decimal_figures = 0 if "." not in str(val) else len(val.split('.')[1])
+        self._err_known_decimal_figures = 0 if "." not in str(err) else len(err.split('.')[1])
 
     def get(self):
-        return self.var
+        return cpy.deepcopy(self._var)
+
+    def set(self, val):
+        self._var = val
+
+    def get_err(self):
+        return cpy.deepcopy(self._err)
+
+    def set_err(self, val):
+        self._err = val
+
+    def sig_round(self, sig_digits=1):
+        val = self.get()
+        err = self.get_err()
+
+        if mt.isnan(err) or type(val) == str or type(err) == str:
+            _error("Invalid Value", "Can only sig_round Vars with well-defined values and error, but got " + str(val) + ", " + str(err))
+            return
+
+
+        sig_pos = mt.floor(mt.log10(
+            err))  # position of the first significant figure relative to the decimal point (Number of digits between first significant digit and point, can be negative (behind point), 0 is in front of point)
+
+        if __debug_extended__:
+            print("Position of first significant digit: ", sig_pos)
+
+        dec_pot = -(
+            -sig_pos + sig_digits - 1 if -sig_pos + sig_digits - 1 <= self._err_known_decimal_figures else self._err_known_decimal_figures)  # digits the point gets shifted by
+        err *= dc.Decimal(10 ** -dec_pot)
+
+        err = mt.ceil(err)
+        str_err = str(err) + ("" if dec_pot == 0 else "\cdot 10\^{" + str(dec_pot) + "}")
+
+
+        val *= dc.Decimal(10**-dec_pot)
+        val = round(val)
+        str_val = str(val) + ("" if dec_pot == 0 else "\cdot 10\^{" + str(dec_pot) + "}")
+
+        percent = dc.Decimal(100) * self._err/self._var
+        perc_pot = mt.floor(mt.log10(percent))
+        percent *= dc.Decimal(10**-perc_pot)
+        percent = mt.ceil(percent)
+        if abs(perc_pot) <= 3:
+            percent = str(percent * dc.Decimal("10")**perc_pot)
+        else:
+            percent = str(percent) + " \cdot 10\^{" + str(perc_pot) + "}"
+
+        return [str_val + " \pm " + str_err + "(\pm " + percent + "\%)", str_val, str_err, percent]
+
+
+
+class MatEx:
+    def __init__(self):
+        self.str = ""
+    # TODO
 
 
 class Dataset:  # Object representing a full Dataset
@@ -179,13 +236,12 @@ class Dataset:  # Object representing a full Dataset
 
     def from_csv(self, path, delimiter=None, c_labels_from_row=0, c_labels=None, indices_from_row=None, usecols=None,
                  userows=None, NaN_alias="NaN", compression=None, strict=False, modify_cols={}, modify_rows={}):
-        #TODO: TEST
+        # TODO: TEST
 
-
-        temp = pandas.read_csv(filepath_or_buffer=path, sep=delimiter, header=c_labels_from_row, names=c_labels,
-                               index_col=indices_from_row, na_values=NaN_alias, na_filter=True,
-                               verbose=__debug_extended__, compression=compression, quotechar="\"", comment="#",
-                               on_bad_lines='error' if strict else 'warn', dtype=object)
+        temp = pd.read_csv(filepath_or_buffer=path, sep=delimiter, header=c_labels_from_row, names=c_labels,
+                           index_col=indices_from_row, na_values=NaN_alias, na_filter=True,
+                           verbose=__debug_extended__, compression=compression, quotechar="\"", comment="#",
+                           on_bad_lines='error' if strict else 'warn', dtype=object)
 
         shp = temp.shape
         for r in range(shp[0]):
@@ -215,11 +271,12 @@ class Dataset:  # Object representing a full Dataset
 ds = Dataset()
 print(ds.frame)
 
-ds.from_lists([[1, 2], [3, 4], [5, 6, 7]], ["a", "b", "c"])
-print("row 2:", type(ds.row(2)), "\n\n")
-print("rows 1, 2:")
-ds.disp_row([1, 2])
+# ds.from_lists([[1, 2], [3, 4], [5, 6, 7]], ["a", "b", "c"])
+# print("row 2:", type(ds.row(2)), "\n\n")
+# print("rows 1, 2:")
+# ds.disp_row([1, 2])
 
 ###################################################################################################
 # Best motivateMe() texts:
 # I understand that your physics laboratory courses may be draining and downright boring, but don't let these setbacks deter you from your goals. Your previous progress on the lab report was phenomenal, and that is a true testament to your intelligence and hardworking nature. Though the courses may not be implemented as efficiently as they should be, do not let this dull your passions. Remain focused and committed to your goals, and you will successfully complete the lab report in no time. Keep striving for greatness!
+

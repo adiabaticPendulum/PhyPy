@@ -24,6 +24,24 @@ Weather to show internal debug info (mainly for debugging the library itself)
 
 How many decimal digits (without rounding errors) shall be used. Default: 128
 
+## Var
+Representation of a single variable or value
+
+### _function_ `sig_round`()
+Round the value of the variable to a given number of significant values (using scientific notation).
+
+**Parameters:**
+
+_int_ `sig_digits`:
+
+Number of significant digits to round to. Default: `1`
+
+**Returns:**
+
+List of str. First entry is the full, LaTex-formated str, second one the rounded value without error, third one the rounded absolute error, fourth one the rounded relative error only.
+
+
+
 ## Dataset
 Representation of a dataset
 
