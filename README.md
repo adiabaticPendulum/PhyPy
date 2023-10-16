@@ -48,20 +48,20 @@ Representation of a dataset
 ### _Pandas.DataFrame_ `Dataset.frame`
 DataFrame containing all data of the Dataset
 
-### _function_ `Dataset.fromLists()`
+### _function_ `Dataset.from_lists()`
 Initialize the Dataset with a multidimensional list.
 
 **Parameters:**
 
 _List_ `lists`: List of the Lists that shall form the collumns of `Dataset.frame`
 
-_List_ `r_labels` _(optional)_: List of labels, rows shall have. Default: `None` (standard-indices)
+_List_ `r_names` _(optional)_: List of labels, rows shall have. Default: `None` (standard-indices)
 
-_List_ `c_labels` _(optional)_: List of the labels, the collumns/lists in `lists` shall have in `Dataset.frame`. Default: `None` (standard-indices)
+_List_ `c_names` _(optional)_: List of the labels, the collumns/lists in `lists` shall have in `Dataset.frame`. Default: `None` (standard-indices)
 
 _Boolean_ `strict` _(optional)_: Weather length-mismatches in the parameters shall produce errors or shall be autocorrected while producing a warning. Default: `False`
 
-### _function_ `Dataset.fromDictionary()`
+### _function_ `Dataset.from_dictionary()`
 Initialize the Dataset with a Python dictionary.
 
 **Parameters:** 
@@ -80,7 +80,7 @@ Returns a row of the Dataset as a Pandas Series.
 
 **Parameters:**
 
-`indices`: List of indices or labels of the rows to return. 
+`indices`: Index or label of the rows to return. 
 
 **Returns:**
 
@@ -92,10 +92,10 @@ Prints a row of the Dataset.
 
 **Parameters:**
 
-`indices`: List of indices or labels of the rows to print. 
+`indices`: Index or label of the rows to print. 
 
 
-### _function_ <code>from_csv(path: _str_, delimiter: _str (length 1)_ (optional), c_labels_from_row: _int_ (optional), c_labels: _list of int_ (optional), indices_from_row _list of int_ (optional), usecols: _list of int_ (optional), userows: _list of int_ (optional), NaN_alias: _list of str_ (optional), compression: _str_, strict: _Boolean_, modify_cols: _dict_, modify_rows: _dict_)</code>
+### _function_ <code>from_csv(path: _str_, delimiter: _str (length 1)_ (optional), c_names_from_row: _int_ (optional), c_names: _list of int_ (optional), indices_from_row _list of int_ (optional), usecols: _list of int_ (optional), userows: _list of int_ (optional), NaN_alias: _list of str_ (optional), compression: _str_, strict: _Boolean_, modify_cols: _dict_, modify_rows: _dict_)</code>
     
 Initializes the Dataset from a `.csv`-file.
 
@@ -105,9 +105,9 @@ Initializes the Dataset from a `.csv`-file.
 
 `delimiter` _(optional)_: Regex that specifies the delimiter to use when reading the file. Default: `None` (uses Pandas/native Python features to auto-detect the delimiter)
 
-`c_labels_from_row` _(optional)_: int, index of row to use as column-labels. Default: `0`
+`c_names_from_row` _(optional)_: int, index of row to use as column-labels. Default: `0`
 
-`c_labels` _(optional)_: List of str to use as column-labels (overriding the ones from `c_labels_from_row`) Default: None (don't override existing labels)
+`c_names` _(optional)_: List of str to use as column-labels (overriding the ones from `c_names_from_row`) Default: None (don't override existing labels)
 
 `indices_from_row` _(optional)_: int, index of row to use as column-labels. Default: `None` (use standard-indices)
 
