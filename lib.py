@@ -189,7 +189,7 @@ class Dataset:  # Object representing a full Dataset
         if val_err_index_pairs is None:
             val_err_index_pairs = []
         if dictionary is not None:
-            self.from_dictionary(self, dictionary, r_names)
+            self.from_dictionary(dictionary, r_names)
         elif lists is not None:
             self.from_lists(lists, r_names, c_names)
         elif csv_path is not None:
@@ -304,12 +304,17 @@ class Dataset:  # Object representing a full Dataset
             _error("Type Error",
                    "Parameter 'dictionary' must be of Type <class 'dict'>, but has type " + str(type(dictionary)))
             return -1
-        if r_names is not None:
-            self.frame = pd.DataFrame(dictionary, r_names)
-        else:
-            self.frame = pd.DataFrame(dictionary)
 
-        self.apply(lambda obj, r_index, c_index: to_val(obj))
+        for item in items:
+            data[item] = []
+            for val in dictionary[item]:
+                data[item].append(to_val(val))
+
+        if r_names is not None:
+            self.frame = pd.DataFrame(data, r_names)
+        else:
+            self.frame = pd.DataFrame(data)
+
 
     def from_lists(self, lists, r_names=None, c_names=None, strict=False):
         if c_names is None:
@@ -358,9 +363,11 @@ class Dataset:  # Object representing a full Dataset
                     lists[i].append(dc.Decimal('NaN'))
         data = {}
         for i in index_of(c_names):
-            data[c_names[i]] = lists[i]
+            data[c_names[i]] = []
+            for j in index_of(lists[i]):
+                data[c_names[i]].append(to_val(lists[i][j]))
+
         self.frame = pd.DataFrame(data, r_names)
-        self.apply(lambda obj, r_index, c_index: to_val(obj))
 
     def from_csv(self, path, delimiter=None, c_names_from_row=0, c_names=None, indices_from_row=None, usecols=None,
                  userows=None, NaN_alias="NaN", compression=None, strict=False, modify_cols={}, modify_rows={}):
@@ -399,6 +406,13 @@ class Dataset:  # Object representing a full Dataset
 ds = Dataset()
 
 ds.from_lists([[1, 2], [3, 4], [5, 6, 7]], ["a", "b", "c"], ["d", "e", "f"])
+print(ds.frame)
+
+dictionary = {
+    "x": [1, 2, 3],
+    "y": [4, 5, 6]
+}
+ds = Dataset(dictionary=dictionary)
 print(ds.frame)
 
 
