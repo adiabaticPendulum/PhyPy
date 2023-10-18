@@ -1,6 +1,6 @@
 # ONLY CHANGE STUFF IN THIS SECTION, NOT IN THE OTHER SECTIONS. SET GLOBAL CONTENTS AND SETTINGS HERE
 __debug_lib__ = __debug__  # Weather to show warnings and debug info. Default: __debug__. Change this to False, if you want to hide the librarys internal debug information, even when you debug your application
-__debug_extended__ = False  # Weather to show internal debug info (mainly for debugging the library itself).
+__debug_extended__ = True  # Weather to show internal debug info (mainly for debugging the library itself).
 
 DEC_DGTS = 128  # How many decimal digits (without rounding errors) shall be used.
 
@@ -17,8 +17,10 @@ import pyppeteer as pt
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import latex2sympy2 as l2s2
+import sympy as smp
 
-libs = [asyncio, mt, pt, plt, np, pd, dc, cpy]
+libs = [asyncio, mt, pt, plt, np, pd, dc, cpy, l2s2]
 
 if DEC_DGTS <= dc.MAX_PREC:
     dc.getcontext().prec = DEC_DGTS
@@ -175,10 +177,32 @@ class Val:  # Todo: document!
         return [str_val + " \pm " + str_err + " \: (\pm " + percent + "\%)", str_val, str_err, percent]
 
 
+class Var:
+    n = ""
+
+    def __init__(self, name):
+        self.name = smp.Symbol(name)
+
+
 class MatEx:
-    def __init__(self):
-        self.str = ""
-    # TODO
+    #TODO: TEST!
+    _expr = 0
+
+    @property
+    def expr(self):
+        return self._expr
+
+    @expr.setter
+    def expr(self, new_expr):
+        self._expr = new_expr
+        self.str = l2s2.latex(self.expr)
+
+    def __init__(self, latex="", sympy=None):
+        self.expr = sympy if sympy is not None else (l2s2.latex2sympy(latex) if not latex == "" else None)
+
+    def at(self, var_val_pairs):
+        for var_val_pair in var_val_pairs:
+            self.expr = self.expr.subs(var_val_pair[0], var_val_pair[1])
 
 
 class Dataset:  # Object representing a full Dataset
@@ -315,7 +339,6 @@ class Dataset:  # Object representing a full Dataset
         else:
             self.frame = pd.DataFrame(data)
 
-
     def from_lists(self, lists, r_names=None, c_names=None, strict=False):
         if c_names is None:
             c_names = []
@@ -414,7 +437,6 @@ dictionary = {
 }
 ds = Dataset(dictionary=dictionary)
 print(ds.frame)
-
 
 ###################################################################################################
 # Best motivateMe() texts:
