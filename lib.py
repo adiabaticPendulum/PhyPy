@@ -96,6 +96,14 @@ def to_val(val, modify=lambda val: val):
         return Val(float(modify(val)))
 
 
+def invert_list(list):
+    res = [0 for l in list]
+    for i in index_of(list):
+        res[len(res) - i - 1] = list[i]
+
+    return res
+
+
 #####################################################################
 # Datasets and Data-Handling
 
@@ -179,15 +187,58 @@ class Val:  # Todo: document!
 
 class Var:
     n = ""
+    str = ""
 
     def __init__(self, name):
-        self.name = smp.Symbol(name)
+        self.str = name
+        self.n = smp.Symbol(name)
+
+    def __str__(self):
+        return self.str
 
 
 class MatEx:
-    #TODO: TEST!
-    _expr = 0
+    vars = {}
 
+    @property
+    def sympy(self):
+        return self._sympy.doit()
+
+    @sympy.setter
+    def sympy(self, new_sympy):
+        self._sympy = new_sympy
+        self._latex = l2s2.latex(self.sympy)
+
+    @property
+    def latex(self):
+        return self._latex
+
+    @latex.setter
+    def latex(self, new_latex):
+        self.sympy = l2s2.latex2sympy(new_latex)
+
+    @property
+    def raw_sympy(self):
+        return self._sympy
+
+    def __init__(self, variables, latex="", sympy=None):
+        self.sympy = sympy if sympy is not None else (l2s2.latex2sympy(latex) if not latex == "" else None)
+        for var in variables:
+            if type(var) is str:
+                self.vars[var] = Var(var)
+            else:
+                self.vars[var.n] = var
+
+    def __str__(self):
+        return self.latex
+
+    def at(self, var_val_pairs):
+        for var_val_pair in var_val_pairs:
+            self.sympy = self.sympy.subs(var_val_pair[0], var_val_pair[1])
+        return self.sympy
+
+
+class Formula:
     @property
     def expr(self):
         return self._expr
@@ -195,14 +246,23 @@ class MatEx:
     @expr.setter
     def expr(self, new_expr):
         self._expr = new_expr
-        self.str = l2s2.latex(self.expr)
+        _err = 0
+        for key in self._expr.vars.keys():
+            _err += (smp.Derivative(self._expr.sympy, self._expr.vars[key].n) * self._expr.vars[key].n) ** 2
+        self.error = MatEx(variables=list(self._expr.vars.values()), sympy=smp.sqrt(_err))
 
-    def __init__(self, latex="", sympy=None):
-        self.expr = sympy if sympy is not None else (l2s2.latex2sympy(latex) if not latex == "" else None)
+    def __init__(self, variables=[], latex="", sympy=None, mat_ex=None):
+        self.expr = MatEx(variables, latex, sympy) if MatEx is None else mat_ex
+
+    def __str__(self):
+        return str(self.expr) + " \pm " + str(self.error)
 
     def at(self, var_val_pairs):
-        for var_val_pair in var_val_pairs:
-            self.expr = self.expr.subs(var_val_pair[0], var_val_pair[1])
+        return self.expr.at(var_val_pairs), self.error.at(var_val_pairs)
+
+    #def create_values(self, ranges):
+        #TODO
+
 
 
 class Dataset:  # Object representing a full Dataset
@@ -426,18 +486,14 @@ class Dataset:  # Object representing a full Dataset
 
 ##################################################
 # Testing
-ds = Dataset()
-
-ds.from_lists([[1, 2], [3, 4], [5, 6, 7]], ["a", "b", "c"], ["d", "e", "f"])
-print(ds.frame)
-
-dictionary = {
-    "x": [1, 2, 3],
-    "y": [4, 5, 6]
-}
-ds = Dataset(dictionary=dictionary)
-print(ds.frame)
-
+expr = MatEx(["x", "y"], "x^2 + y")
+print(expr)
+# print(expr.latex)
+# print(expr.at([["x", 2], ["y", 5]]))
+# expr.latex = "2x+5y"
+print(expr.sympy, " oder ", expr)
+f = Formula(mat_ex=expr)
+print(f.at([["x", 3], ["y", 4]]))
 ###################################################################################################
 # Best motivateMe() texts:
 # I understand that your physics laboratory courses may be draining and downright boring, but don't let these setbacks deter you from your goals. Your previous progress on the lab report was phenomenal, and that is a true testament to your intelligence and hardworking nature. Though the courses may not be implemented as efficiently as they should be, do not let this dull your passions. Remain focused and committed to your goals, and you will successfully complete the lab report in no time. Keep striving for greatness!
