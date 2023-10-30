@@ -90,15 +90,6 @@ def index_of(arr, start=0):
     return range(start, len(arr))
 
 
-def to_val(val, modify=lambda val: val):
-    try:
-        return Val(modify(val))
-    except dc.InvalidOperation:
-        return str(val)
-    except:
-        return Val(float(modify(val)))
-
-
 def invert_list(list):
     res = [0 for l in list]
     for i in index_of(list):
@@ -112,6 +103,26 @@ def invert_list(list):
 
 class Val:  # Todo: document!
 
+    @staticmethod
+    def to_val(val, modify=lambda val: val):
+        try:
+            return Val(modify(val))
+        except dc.InvalidOperation:
+            return str(val)
+        except:
+            return Val(float(modify(val)))
+
+    @staticmethod
+    def weighted_mean(val_list=None):
+        x_over_sig_sq = dc.Decimal(0)
+        rez_sig_sq = dc.Decimal(0)
+
+        for val in val_list:
+            x_over_sig_sq += dc.Decimal(val.v / (val.e ** 2))
+            rez_sig_sq += dc.Decimal(1 / (val.e ** 2))
+
+        return Val(str(x_over_sig_sq / rez_sig_sq), str(mt.sqrt(dc.Decimal(1 / rez_sig_sq))))
+
     def __init__(self, val, err="NaN"):
         self.v = dc.Decimal(val)
         self.e = dc.Decimal(err)
@@ -120,7 +131,7 @@ class Val:  # Todo: document!
 
     def __str__(self):
         return self.sig_round(warn_for_bad_error=False)[0]
-        #return str(self.v) if mt.isnan(self.e) or type(self.e) == str else self.sig_round()[0]
+        # return str(self.v) if mt.isnan(self.e) or type(self.e) == str else self.sig_round()[0]
 
     def __float__(self):
         return float(self.v)
@@ -137,19 +148,20 @@ class Val:  # Todo: document!
     def set_err(self, val):
         self.e = val
 
-    def sig_round(self, sig_digits=1, ignore_errors=False, additional_digit=True, warn_for_bad_error = True):
+    def sig_round(self, sig_digits=1, ignore_errors=False, additional_digit=True, warn_for_bad_error=True):
         val = self.get()
         err = self.get_err()
         if err == 0 or mt.isnan(err):
             if warn_for_bad_error:
-                _warn("ValueWarning", "Can't sig_round() Val with error 'NaN' or '0', but got (" + str(val) + ", " + str(err) + ")")
+                _warn("ValueWarning",
+                      "Can't sig_round() Val with error 'NaN' or '0', but got (" + str(val) + ", " + str(err) + ")")
             if val == 0:
                 return ["0"]
             dec_pot = dc.Decimal(mt.floor(mt.log10(val)) - sig_digits - 1)
-            val *= dc.Decimal(10**-dec_pot)
+            val *= dc.Decimal(10 ** -dec_pot)
             val = round(val)
-            return [str(val*dc.Decimal(10**dec_pot)) if abs(dec_pot) < 3 else str(val) + " \cdot 10\^{" + str(dec_pot) + "}"]
-
+            return [str(val * dc.Decimal(10 ** dec_pot)) if abs(dec_pot) < 3 else str(val) + " \cdot 10\^{" + str(
+                dec_pot) + "}"]
 
         if not ignore_errors and (mt.isnan(err) or type(val) == str or type(err) == str):
             _error("Invalid Value",
@@ -292,7 +304,8 @@ class Formula(MatEx):
             return Val(str(at[0].evalf()), str(at[1].evalf()))
         except dc.InvalidOperation:
             _error(name="ConversionError",
-                   description="Can't convert sympy (" +str(at[0].evalf()) + "\\pm" + str(at[1].evalf()) + ") to Val. Make shure that the specified key-value-pairs are providing values for all used variables, so that the sympy-expressioon can be evaluated to a numeric expression and doesn't contain any unset variables.")
+                   description="Can't convert sympy (" + str(at[0].evalf()) + "\\pm" + str(at[
+                                                                                               1].evalf()) + ") to Val. Make shure that the specified key-value-pairs are providing values for all used variables, so that the sympy-expressioon can be evaluated to a numeric expression and doesn't contain any unset variables.")
 
     def clone(self):
         return cpy.copy(self)
@@ -313,8 +326,7 @@ class Formula(MatEx):
                 val.e = dc.Decimal("NaN")
             data[val_label].append(val)
 
-
-        return Dataset(dictionary=data)#, r_names=[var, val_label]
+        return Dataset(dictionary=data)  # , r_names=[var, val_label]
 
 
 class Dataset:  # Object representing a full Dataset
@@ -446,7 +458,7 @@ class Dataset:  # Object representing a full Dataset
             data[item] = []
             for val in dictionary[item]:
                 if not type(val) is Val:
-                    data[item].append(to_val(val))
+                    data[item].append(Val.to_val(val))
                 else:
                     data[item].append(val)
 
@@ -504,7 +516,7 @@ class Dataset:  # Object representing a full Dataset
         for i in index_of(c_names):
             data[c_names[i]] = []
             for j in index_of(lists[i]):
-                data[c_names[i]].append(to_val(lists[i][j]))
+                data[c_names[i]].append(Val.to_val(lists[i][j]))
 
         self.frame = pd.DataFrame(data, r_names)
 
@@ -520,7 +532,7 @@ class Dataset:  # Object representing a full Dataset
         shp = temp.shape
         for r in range(shp[0]):
             for c in range(shp[1]):
-                temp.loc[r][c] = to_val(temp.loc[r][c])
+                temp.loc[r][c] = Val.to_val(temp.loc[r][c])
 
         for k in modify_cols.keys():
             for i in index_of(temp.get[k]):
@@ -537,12 +549,12 @@ class Dataset:  # Object representing a full Dataset
 
         temp = temp[[col for col in usecols]]
         self.frame = temp.loc[userows]
-        self.apply(lambda obj, r_index, c_index: to_val(obj))
+        self.apply(lambda obj, r_index, c_index: Val.to_val(obj))
 
-    def to_csv(self, path, delimiter=";", columns=None):
+    def to_csv(self, path, delimiter=";", columns=None, show_index=False):
         if columns is None:
             columns = self.get_col_names()
-        self.frame.to_csv(path, sep=delimiter, index_label=self.x_label, columns=columns)
+        self.frame.to_csv(path, sep=delimiter, index_label=self.x_label, columns=columns, index=show_index)
 
     def to_latex(self, show_index=False):
         styler = sty.Styler(self.frame)
@@ -560,19 +572,15 @@ class Dataset:  # Object representing a full Dataset
         ltx = ltx.replace("\end{tabular}", "\hline\n\end{tabular}")
         return ltx
 
-    ##################################################
+
+##################################################
+
 
 # Testing
-frml = Formula(["x"], "2x+3")
-ds = frml.create_values(np.linspace(0, 10, 11))
-ds.print()
-ds.to_csv("../test.csv")
-print(ds.to_latex())
+lst = [Val(str(i), str(i)) for i in range(1, 11)]
+print(Val.weighted_mean(lst).v)
 
 ###################################################################################################
 # Best motivateMe() texts:
 # I understand that your physics laboratory courses may be draining and downright boring, but don't let these setbacks deter you from your goals. Your previous progress on the lab report was phenomenal, and that is a true testament to your intelligence and hardworking nature. Though the courses may not be implemented as efficiently as they should be, do not let this dull your passions. Remain focused and committed to your goals, and you will successfully complete the lab report in no time. Keep striving for greatness!
-
-
-# TODO: FIX ERROR NOT USING SIGMA; FIX CREATE_VALUES!!!
 
