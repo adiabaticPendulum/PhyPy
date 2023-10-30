@@ -15,6 +15,7 @@ import decimal as dc
 import copy as cpy
 import pyppeteer as pt
 import matplotlib.pyplot as plt
+import matplotlib.ticker as tck
 import numpy as np
 import pandas as pd
 import pandas.io.formats.style as sty
@@ -22,7 +23,7 @@ import latex2sympy2 as l2s2
 import sympy as smp
 import re
 
-libs = [asyncio, mt, pt, plt, np, pd, dc, cpy, l2s2]
+libs = [asyncio, mt, pt, plt, np, pd, dc, cpy, l2s2, tck, smp]
 
 if DEC_DGTS <= dc.MAX_PREC:
     dc.getcontext().prec = DEC_DGTS
@@ -41,6 +42,15 @@ if __debug_lib__:
         except AttributeError:
             pass
     print("\n\n####################################################################\n\n")
+
+# Latex Setup:
+plt.rcParams['text.usetex'] = True
+plt.rcParams['text.latex.preamble'] = r'\usepackage{xfrac, amsmath}'
+plt.rcParams['font.size'] = 14
+plt.rcParams['axes.labelsize'] = 25
+plt.rcParams['xtick.labelsize'] = 14
+plt.rcParams['ytick.labelsize'] = 14
+plt.rcParams['errorbar.capsize'] = 5
 
 
 ########################################################################################################
@@ -472,7 +482,7 @@ class Dataset:  # Object representing a full Dataset
             c_names = []
 
         if r_names is None:
-            r_names = []
+            r_names = range(len(lists[0]))
 
         if len(lists) != len(c_names):
             if strict:
@@ -573,14 +583,87 @@ class Dataset:  # Object representing a full Dataset
         return ltx
 
 
+class Plot:
+
+    point_datasets = []
+    curve_datasets = []
+
+    def _update_plt(self):
+        plt.figure(self.fig)
+
+        for dataset in self.point_datasets:
+            plt.scatter([val.v for val in list(dataset.col(0))], [val.v for val in list(dataset.col(1))],
+                        marker="x")
+        for dataset in self.curve_datasets:
+            plt.plot([val.v for val in list(dataset.col(0))], [val.v for val in list(dataset.col(1))])
+
+        plt.title(self.title, fontsize=30)
+        if self.x_label is not None:
+            plt.xlabel(self.x_label)
+        if self.y_label is not None:
+            plt.ylabel(self.y_label)
+
+    def show(self):
+        self._update_plt()
+        plt.show()
+
+    def save(self, path, dpi=None):
+        self._update_plt()
+        if dpi is None:
+            plt.savefig(fname=path)
+        else:
+            plt.savefig(fname=path, dpi=dpi)
+
+    def add_points(self, new_point_dataset):
+        self.point_datasets.append(new_point_dataset)
+        self._update_plt()
+
+    def add_curve(self, curve_dataset):
+        self.curve_datasets.append(curve_dataset)
+        self._update_plt()
+
+    def __init__(self, point_datasets=None, curve_datasets=None, title="Title", x_label=None, y_label=None):
+        if curve_datasets is None:
+            curve_datasets = []
+        if point_datasets is None:
+            point_datasets = []
+
+        if type(point_datasets) is Dataset:
+            point_datasets = [point_datasets]
+        if type(curve_datasets) is Dataset:
+            curve_datasets = [curve_datasets]
+
+        self.fig, self.axes = plt.subplots(figsize=(12, 7.5))
+        self.title = title
+        self.axes.grid(which="major", linestyle="-", linewidth=1)
+        self.axes.grid(which="minor", linestyle=":", linewidth=0.75)
+        self.axes.xaxis.set_minor_locator(tck.AutoMinorLocator(4))
+        self.axes.yaxis.set_minor_locator(tck.AutoMinorLocator(4))
+        self.point_datasets = point_datasets
+        self.curve_datasets = curve_datasets
+
+        #TODO:CHECK ALL LABELS
+        self.x_label = x_label if x_label is not None else self.point_datasets[0].x_label
+        self.y_label = y_label if y_label is not None else self.point_datasets[0].y_label
+        for point_dataset in point_datasets:
+            point_dataset.x_label = self.x_label
+            point_dataset.y_label = self.y_label
+        for curve_dataset in curve_datasets:
+            curve_dataset.x_label = self.x_label
+            curve_dataset.y_label = self.y_label
+
+
+
+
 ##################################################
 
 
 # Testing
-lst = [Val(str(i), str(i)) for i in range(1, 11)]
-print(Val.weighted_mean(lst).v)
+ds = Dataset(lists=[[0, 1, 2, 3], [2, 3, 4, 5]], x_label="x")
+plot = Plot(ds, ds, title="Test", y_label="$\\phi$")
+plot.show()
+#TODO: ERRORBARS
 
 ###################################################################################################
 # Best motivateMe() texts:
 # I understand that your physics laboratory courses may be draining and downright boring, but don't let these setbacks deter you from your goals. Your previous progress on the lab report was phenomenal, and that is a true testament to your intelligence and hardworking nature. Though the courses may not be implemented as efficiently as they should be, do not let this dull your passions. Remain focused and committed to your goals, and you will successfully complete the lab report in no time. Keep striving for greatness!
-
