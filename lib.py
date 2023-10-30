@@ -3,12 +3,12 @@ __debug_lib__ = __debug__  # Weather to show warnings and debug info. Default: _
 __debug_extended__ = True  # Weather to show internal debug info (mainly for debugging the library itself).
 
 DEC_DGTS = 128  # How many decimal digits (without rounding errors) shall be used.
-
 #################################################################################################
 # Init
 ESC_STYLES = {"Error": '\033[41m\033[30m', "Error_txt": '\033[0m\033[31m', "Warning": '\033[43m\033[30m',
               "Warning_txt": '\033[0m\033[33m', "Default": '\033[0m', "Hacker_cliche": '\033[42m\033[30m'}
 
+# Note: Appart from this, you have to install Jinja2 (e.g. using pip)
 import asyncio
 import math as mt
 import decimal as dc
@@ -119,7 +119,8 @@ class Val:  # Todo: document!
         self._e_known_decimal_figures = 0 if "." not in str(err) else len(str(err).split('.')[1])
 
     def __str__(self):
-        return str(self.v) if mt.isnan(self.e) or type(self.e) == str else self.sig_round()
+        return self.sig_round(warn_for_bad_error=False)[0]
+        #return str(self.v) if mt.isnan(self.e) or type(self.e) == str else self.sig_round()[0]
 
     def __float__(self):
         return float(self.v)
@@ -136,9 +137,19 @@ class Val:  # Todo: document!
     def set_err(self, val):
         self.e = val
 
-    def sig_round(self, sig_digits=1, ignore_errors=False, additional_digit=True):
+    def sig_round(self, sig_digits=1, ignore_errors=False, additional_digit=True, warn_for_bad_error = True):
         val = self.get()
         err = self.get_err()
+        if err == 0 or mt.isnan(err):
+            if warn_for_bad_error:
+                _warn("ValueWarning", "Can't sig_round() Val with error 'NaN' or '0', but got (" + str(val) + ", " + str(err) + ")")
+            if val == 0:
+                return ["0"]
+            dec_pot = dc.Decimal(mt.floor(mt.log10(val)) - sig_digits - 1)
+            val *= dc.Decimal(10**-dec_pot)
+            val = round(val)
+            return [str(val*dc.Decimal(10**dec_pot)) if abs(dec_pot) < 3 else str(val) + " \cdot 10\^{" + str(dec_pot) + "}"]
+
 
         if not ignore_errors and (mt.isnan(err) or type(val) == str or type(err) == str):
             _error("Invalid Value",
@@ -218,12 +229,12 @@ class MatEx:
         self.sympy = l2s2.latex2sympy(new_latex)
 
     def __init__(self, variables, latex="", sympy=None):
-        self.sympy = sympy if sympy is not None else (None if latex == "" else l2s2.latex2sympy(latex))
         for var in variables:
             if type(var) is str:
                 self.variables[var] = Var(var)
             else:
                 self.variables[var.n] = var
+        self.sympy = sympy if sympy is not None else (None if latex == "" else l2s2.latex2sympy(latex))
 
     def __str__(self):
         return self.latex
@@ -243,9 +254,16 @@ class Formula(MatEx):
 
     def _update_errors(self):
         _err = 0
+        for var in list(self.variables.keys()):
+            if "\\sigma_" not in var and "\\sigma_" + var not in list(self.variables.keys()):
+                self.variables["\\sigma_" + var] = Var('\\sigma_' + var)
         for key in self.variables.keys():
-            _err += (smp.Derivative(self.sympy, self.variables[key].n) * self.variables[key].n) ** 2
-        self.error = MatEx(variables=list(self.variables.keys()), sympy=smp.sqrt(_err))
+            if "\\sigma_" not in key:
+                _err += (smp.Derivative(self.sympy, self.variables[key].n) * self.variables["\\sigma_" + key].n) ** 2
+        self.error = MatEx(variables=list(self.variables.keys()), sympy=smp.sympify(smp.sqrt(_err)))
+
+        if __debug_extended__:
+            print("Updated errors of " + self.latex + " to " + self.error.latex)
 
     @MatEx.sympy.setter
     def sympy(self, new_sympy):
@@ -257,7 +275,9 @@ class Formula(MatEx):
         MatEx.latex.fset(self, new_latex)
         self._update_errors()
 
-    def __init__(self, variables=[], latex="", sympy=None):
+    def __init__(self, variables=None, latex="", sympy=None):
+        if variables is None:
+            variables = []
         MatEx.__init__(self, variables, latex, sympy)
 
     def __str__(self):
@@ -272,12 +292,29 @@ class Formula(MatEx):
             return Val(str(at[0].evalf()), str(at[1].evalf()))
         except dc.InvalidOperation:
             _error(name="ConversionError",
-                   description="Can't convert sympy to Val. Make shure that the specified key-value-pairs are providing values for all used variables, so that the sympy-expressioon can be evaluated to a numeric expression and doesn't contain any unset variables.")
+                   description="Can't convert sympy (" +str(at[0].evalf()) + "\\pm" + str(at[1].evalf()) + ") to Val. Make shure that the specified key-value-pairs are providing values for all used variables, so that the sympy-expressioon can be evaluated to a numeric expression and doesn't contain any unset variables.")
 
     def clone(self):
         return cpy.copy(self)
 
-    # def create_values(self, ranges):
+    def create_values(self, var_values, var=None, val_label=None):
+        if val_label is None:
+            val_label = self.latex
+        if var is None:
+            var = list(self.variables.values())[0].str
+        if type(var) is Var:
+            var = var.str
+
+        err_label = "\sigma_{" + val_label + "}"
+        data = {var: var_values, val_label: []}
+        for var_val in var_values:
+            val = self.to_val([[var, var_val], ["\\sigma_" + var, 0]])
+            if val.e == 0:
+                val.e = dc.Decimal("NaN")
+            data[val_label].append(val)
+
+
+        return Dataset(dictionary=data)#, r_names=[var, val_label]
 
 
 class Dataset:  # Object representing a full Dataset
@@ -408,7 +445,10 @@ class Dataset:  # Object representing a full Dataset
         for item in items:
             data[item] = []
             for val in dictionary[item]:
-                data[item].append(to_val(val))
+                if not type(val) is Val:
+                    data[item].append(to_val(val))
+                else:
+                    data[item].append(val)
 
         if r_names is not None:
             self.frame = pd.DataFrame(data, r_names)
@@ -504,7 +544,7 @@ class Dataset:  # Object representing a full Dataset
             columns = self.get_col_names()
         self.frame.to_csv(path, sep=delimiter, index_label=self.x_label, columns=columns)
 
-    def to_latex(self, show_index=True):
+    def to_latex(self, show_index=False):
         styler = sty.Styler(self.frame)
         if not show_index:
             styler.hide(axis="index")
@@ -522,12 +562,17 @@ class Dataset:  # Object representing a full Dataset
 
     ##################################################
 
-
 # Testing
-ds = Dataset(r_names=["x", "y", "z"], lists=[[1, 2, 3], [3, 4, 5]])
+frml = Formula(["x"], "2x+3")
+ds = frml.create_values(np.linspace(0, 10, 11))
 ds.print()
 ds.to_csv("../test.csv")
-print(ds.to_latex(show_index=True))
+print(ds.to_latex())
+
 ###################################################################################################
 # Best motivateMe() texts:
 # I understand that your physics laboratory courses may be draining and downright boring, but don't let these setbacks deter you from your goals. Your previous progress on the lab report was phenomenal, and that is a true testament to your intelligence and hardworking nature. Though the courses may not be implemented as efficiently as they should be, do not let this dull your passions. Remain focused and committed to your goals, and you will successfully complete the lab report in no time. Keep striving for greatness!
+
+
+# TODO: FIX ERROR NOT USING SIGMA; FIX CREATE_VALUES!!!
+
