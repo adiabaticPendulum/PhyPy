@@ -10,6 +10,7 @@ ESC_STYLES = {"Error": '\033[41m\033[30m', "Error_txt": '\033[0m\033[31m', "Warn
 
 # Note: Appart from this, you have to install Jinja2 (e.g. using pip)
 import asyncio
+import colorsys as cls
 import math as mt
 import decimal as dc
 import copy as cpy
@@ -23,7 +24,7 @@ import latex2sympy2 as l2s2
 import sympy as smp
 import re
 
-libs = [asyncio, mt, pt, plt, np, pd, dc, cpy, l2s2, tck, smp]
+libs = [asyncio, cls, mt, pt, plt, np, pd, dc, cpy, l2s2, tck, smp]
 
 if DEC_DGTS <= dc.MAX_PREC:
     dc.getcontext().prec = DEC_DGTS
@@ -607,15 +608,23 @@ class Plot:
 
     @staticmethod
     def _color(index):
-        #TODO:REDO
+        golden_ratio = (1+mt.sqrt(5))/2
         if index == 0:
-            return [1, 0, 0]
-        elif index == 1:
-            return [0, 1, 0]
-        elif index == 2:
-            return [0, 0, 1]
+            return [cls.hsv_to_rgb(1/3, 1, 1)[i] for i in range(3)]
 
-        return [Plot._color(index - 3)[0] * (1/2 if index % 3 == 0 else 1), Plot._color(index - 3)[1] * (1/2 if index % 3 == 1 else 1), Plot._color(index - 3)[2] * (1/2 if index % 3 == 2 else 1)]
+        last_color = cls.rgb_to_hsv(Plot._color(index - 1)[0], Plot._color(index - 1)[1], Plot._color(index - 1)[2])
+        h = last_color[0] + 1/3
+        v = last_color[2]
+        s = last_color[1]
+        if index % 3 == 0:
+            h += (1/3) / 2**(mt.floor(index/3))
+            h = h - mt.floor(h)
+            if not index % 6 == 0:
+                v -= (1/2) / 2**(mt.floor(1 + index/6))
+            else:
+                s -= (1/3) / 2**(mt.floor(index/6))
+
+        return [cls.hsv_to_rgb(h, s, v)[i] for i in range(3)]
 
     def _update_plt(self):
         plt.figure(self.fig)
@@ -699,11 +708,12 @@ class Plot:
 
 import random as rnd
 
+print([cls.rgb_to_hsv(Plot._color(i)[0], Plot._color(i)[1], Plot._color(i)[2]) for i in range(10)])
 # Testing
-ds = [Dataset(lists=[[0, 1, 2, 3], [Val(rnd.randrange(0, 10, 1), str(rnd.randrange(0, 10, 1))) for i in range(4)]]) for j in range(10)]
+ds = [Dataset(lists=[[0, 1, 2, 3], [Val(rnd.randrange(0, 10, 1), str(rnd.randrange(0, 10, 1))) for i in range(4)]]) for j in range(9)]
 plot = Plot(ds, ds, title="Test", y_label="$\\phi$")
 plot.show()
-# TODO: ERRORBARS
+
 
 ###################################################################################################
 # Best motivateMe() texts:
