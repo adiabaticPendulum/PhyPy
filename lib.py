@@ -115,6 +115,8 @@ class Val:  # Todo: document!
 
     @staticmethod
     def to_val(val, modify=lambda val: val):
+        if type(val) is Val:
+            return modify(val)
         try:
             return Val(modify(val))
         except dc.InvalidOperation:
@@ -199,20 +201,23 @@ class Val:  # Todo: document!
         val = round(val)
         str_val = str(val) + ("" if dec_pot == 0 else " \cdot 10\^{" + str(dec_pot) + "}")
 
-        percent = dc.Decimal(100) * self.e / self.v
-        perc_pot = mt.floor(mt.log10(percent)) - 1
-        if abs(perc_pot + 1) <= 3:
-            if perc_pot >= 0:
-                percent = mt.ceil(percent)
+        if self.v == 0:
+            percent = "NaN"
+        else:
+            percent = dc.Decimal(100) * self.e / self.v
+            perc_pot = mt.floor(mt.log10(percent)) - 1
+            if abs(perc_pot + 1) <= 3:
+                if perc_pot >= 0:
+                    percent = mt.ceil(percent)
+                else:
+                    percent *= dc.Decimal(10) ** dc.Decimal(-perc_pot)
+                    percent = mt.ceil(percent)
+                    percent *= dc.Decimal(10) ** dc.Decimal(perc_pot)
+                percent = str(percent)
             else:
                 percent *= dc.Decimal(10) ** dc.Decimal(-perc_pot)
                 percent = mt.ceil(percent)
-                percent *= dc.Decimal(10) ** dc.Decimal(perc_pot)
-            percent = str(percent)
-        else:
-            percent *= dc.Decimal(10) ** dc.Decimal(-perc_pot)
-            percent = mt.ceil(percent)
-            percent = str(percent) + " \cdot 10\^{" + str(perc_pot) + "}"
+                percent = str(percent) + " \cdot 10\^{" + str(perc_pot) + "}"
 
         return [str_val + " \pm " + str_err + " \: (\pm " + percent + "\%)", str_val, str_err, percent]
 
@@ -318,7 +323,7 @@ class Formula(MatEx):
                                                                                                1].evalf()) + ") to Val. Make shure that the specified key-value-pairs are providing values for all used variables, so that the sympy-expressioon can be evaluated to a numeric expression and doesn't contain any unset variables.")
 
     def clone(self):
-        return cpy.copy(self)
+        return cpy.deepcopy(self)
 
     def create_values(self, var_values, var=None, val_label=None):
         if val_label is None:
@@ -561,6 +566,15 @@ class Dataset:  # Object representing a full Dataset
         self.frame = temp.loc[userows]
         self.apply(lambda obj, r_index, c_index: Val.to_val(obj))
 
+    def filter(self, c_index, filter_method):
+        col = list(self.col(c_index))
+        for i in index_of(col):
+            if filter_method(col[i]):
+                print(i, filter_method(col[i]), col[i].e)
+                self.delete(r_indices=i)
+                self.filter(c_index, filter_method)
+                break
+
     def to_csv(self, path, delimiter=";", columns=None, show_index=False):
         if columns is None:
             columns = self.get_col_names()
@@ -582,20 +596,48 @@ class Dataset:  # Object representing a full Dataset
         ltx = ltx.replace("\end{tabular}", "\hline\n\end{tabular}")
         return ltx
 
+    def clone(self):
+        return cpy.deepcopy(self)
+
 
 class Plot:
-
     point_datasets = []
     curve_datasets = []
+    sigma_interval = 1
+
+    @staticmethod
+    def _color(index):
+        #TODO:REDO
+        if index == 0:
+            return [1, 0, 0]
+        elif index == 1:
+            return [0, 1, 0]
+        elif index == 2:
+            return [0, 0, 1]
+
+        return [Plot._color(index - 3)[0] * (1/2 if index % 3 == 0 else 1), Plot._color(index - 3)[1] * (1/2 if index % 3 == 1 else 1), Plot._color(index - 3)[2] * (1/2 if index % 3 == 2 else 1)]
 
     def _update_plt(self):
         plt.figure(self.fig)
 
-        for dataset in self.point_datasets:
+        for i in index_of(self.point_datasets):
+            dataset = self.point_datasets[i]
+            if dataset is None:
+                continue
+            err_ds = dataset.clone()
+            err_ds.filter(1, lambda val: mt.isnan(val.e) or val.e is None)
+            plt.errorbar(x=[val.v for val in list(err_ds.col(0))], y=[val.v for val in list(err_ds.col(1))],
+                         yerr=[val.e for val in list(err_ds.col(1))], xerr=[val.e for val in list(err_ds.col(0))],
+                         fmt='None', ecolor=self._color(i))
+            err_ds.print()
             plt.scatter([val.v for val in list(dataset.col(0))], [val.v for val in list(dataset.col(1))],
-                        marker="x")
-        for dataset in self.curve_datasets:
-            plt.plot([val.v for val in list(dataset.col(0))], [val.v for val in list(dataset.col(1))])
+                        marker="x", color=self._color(i))
+
+        for i in index_of(self.curve_datasets):
+            dataset = self.curve_datasets[i]
+            if dataset is None:
+                continue
+            plt.plot([val.v for val in list(dataset.col(0))], [val.v for val in list(dataset.col(1))], color=self._color(i))
 
         plt.title(self.title, fontsize=30)
         if self.x_label is not None:
@@ -642,7 +684,7 @@ class Plot:
         self.point_datasets = point_datasets
         self.curve_datasets = curve_datasets
 
-        #TODO:CHECK ALL LABELS
+        # TODO:CHECK ALL LABELS
         self.x_label = x_label if x_label is not None else self.point_datasets[0].x_label
         self.y_label = y_label if y_label is not None else self.point_datasets[0].y_label
         for point_dataset in point_datasets:
@@ -653,16 +695,15 @@ class Plot:
             curve_dataset.y_label = self.y_label
 
 
-
-
 ##################################################
 
+import random as rnd
 
 # Testing
-ds = Dataset(lists=[[0, 1, 2, 3], [2, 3, 4, 5]], x_label="x")
+ds = [Dataset(lists=[[0, 1, 2, 3], [Val(rnd.randrange(0, 10, 1), str(rnd.randrange(0, 10, 1))) for i in range(4)]]) for j in range(10)]
 plot = Plot(ds, ds, title="Test", y_label="$\\phi$")
 plot.show()
-#TODO: ERRORBARS
+# TODO: ERRORBARS
 
 ###################################################################################################
 # Best motivateMe() texts:
