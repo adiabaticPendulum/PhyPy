@@ -616,13 +616,14 @@ class Plot:
         h = last_color[0] + 1/3
         v = last_color[2]
         s = last_color[1]
-        if index % 3 == 0:
+        if index % 3 == 0 and index != 0:
             h += (1/3) / 2**(mt.floor(index/3))
             h = h - mt.floor(h)
-            if not index % 6 == 0:
-                v -= (1/2) / 2**(mt.floor(1 + index/6))
+            if index % 6 == 0:
+                v -= (1/2) / 2**(mt.floor(index/6))
             else:
-                s -= (1/3) / 2**(mt.floor(index/6))
+                s -= (1/2) / 2**(mt.floor(1 + index/6))
+
 
         return [cls.hsv_to_rgb(h, s, v)[i] for i in range(3)]
 
@@ -708,9 +709,8 @@ class Plot:
 
 import random as rnd
 
-print([cls.rgb_to_hsv(Plot._color(i)[0], Plot._color(i)[1], Plot._color(i)[2]) for i in range(10)])
 # Testing
-ds = [Dataset(lists=[[0, 1, 2, 3], [Val(rnd.randrange(0, 10, 1), str(rnd.randrange(0, 10, 1))) for i in range(4)]]) for j in range(9)]
+ds = [Dataset(lists=[[0, 1, 2, 3], [Val(rnd.randrange(0, 10, 1), str(rnd.randrange(0, 10, 1))) for i in range(4)]]) for j in range(12)]
 plot = Plot(ds, ds, title="Test", y_label="$\\phi$")
 plot.show()
 
