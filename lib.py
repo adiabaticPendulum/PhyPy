@@ -8,7 +8,7 @@ DEC_DGTS = 128  # How many decimal digits (without rounding errors) shall be use
 ESC_STYLES = {"Error": '\033[41m\033[30m', "Error_txt": '\033[0m\033[31m', "Warning": '\033[43m\033[30m',
               "Warning_txt": '\033[0m\033[33m', "Default": '\033[0m', "Hacker_cliche": '\033[42m\033[30m'}
 
-# Note: Appart from this, you have to install Jinja2 (e.g. using pip)
+# Note: Appart from this, you have to install 'Jinja2' (e.g. using pip)
 import asyncio
 import colorsys as cls
 import math as mt
@@ -17,12 +17,12 @@ import copy as cpy
 import pyppeteer as pt
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tck
+import matplotlib.patches as ptc
 import numpy as np
 import pandas as pd
 import pandas.io.formats.style as sty
 import latex2sympy2 as l2s2
 import sympy as smp
-import re
 
 libs = [asyncio, cls, mt, pt, plt, np, pd, dc, cpy, l2s2, tck, smp]
 
@@ -112,6 +112,50 @@ def invert_list(list):
 #####################################################################
 # Datasets and Data-Handling
 
+class Euler_Solver:
+
+    def evaluate(self, resolution, stop=None, variable_values=None):
+        res = [[self.initial_condition[0]], [self.initial_condition[1]]]
+
+        client_wants_ds = type(variable_values) is list
+        if not client_wants_ds:
+            variable_values = [variable_values]
+
+        if variable_values is not None:
+            stop = variable_values[-1]
+        else:
+            variable_values = []
+
+        variable_values.sort()
+        client_values = []
+        client_values_i = 0
+        i = 1
+        while True:
+            if variable_values[client_values_i] <= res[0][i-1] + resolution:
+                client_values.append(res[1][i-1] + (variable_values[client_values_i] - res[0][i-1])*self.differential_equation.at([[self.variable.n, res[0][i-1]], [self.result_variable.n, res[1][i-1]]]))
+                client_values_i += 1
+            res[0].append(res[0][i-1] + resolution)
+            res[1].append(res[1][i-1] + resolution * self.differential_equation.at([[self.variable.n, res[0][i-1]], [self.result_variable.n, res[1][i-1]]]))
+
+            if res[0][i] >= stop:
+                break
+            i += 1
+
+        if client_wants_ds:
+            return Dataset(c_names=[self.variable, self.result_variable], lists=[variable_values, client_values])
+
+        if len(client_values) == 1:
+            return variable_values[0]
+
+        return Dataset(c_names=[self.variable, self.result_variable], lists=res)
+
+    def __init__(self, result_variable, variable, differential_equation, initial_condition):
+        #tuple initial_condition, MatEx diferential_equation
+        self.differential_equation = differential_equation
+        self.initial_condition = initial_condition
+        self.variable = variable
+        self.result_variable = result_variable
+
 class Val:  # Todo: document!
 
     @staticmethod
@@ -170,7 +214,8 @@ class Val:  # Todo: document!
                       "Can't sig_round() Val with error 'NaN' or '0', but got (" + str(val) + ", " + str(err) + ")")
             if val == 0:
                 return ["0"]
-            dec_pot = dc.Decimal(mt.floor(mt.log10(val)) - sig_digits - 1)
+
+            dec_pot = dc.Decimal(mt.floor(mt.log10(abs(val))) - sig_digits - 1)
             val *= dc.Decimal(10 ** -dec_pot)
             val = round(val)
             return [str(val * dc.Decimal(10 ** dec_pot)) if abs(dec_pot) < 3 else str(val) + " \cdot 10\^{" + str(
@@ -280,7 +325,7 @@ class Formula(MatEx):
     def from_mat_ex(mat_ex):
         return Formula(variables=list(mat_ex.variables.keys()), sympy=mat_ex.sympy)
 
-    def _update_errors(self):
+    def update_errors(self):
         _err = 0
         for var in list(self.variables.keys()):
             if "\\sigma_" not in var and "\\sigma_" + var not in list(self.variables.keys()):
@@ -296,12 +341,12 @@ class Formula(MatEx):
     @MatEx.sympy.setter
     def sympy(self, new_sympy):
         MatEx.sympy.fset(self, new_sympy)
-        self._update_errors()
+        self.update_errors()
 
     @MatEx.latex.setter
     def latex(self, new_latex):
         MatEx.latex.fset(self, new_latex)
-        self._update_errors()
+        self.update_errors()
 
     def __init__(self, variables=None, latex="", sympy=None):
         if variables is None:
@@ -376,7 +421,7 @@ class Dataset:  # Object representing a full Dataset
             res = self.frame[index]
         except:
             res = self.frame[self.get_names([0, index])[1]]
-        return res
+        return list(res)
 
     def at(self, r_index, c_index):
         r_name = self.get_names([r_index, c_index])[0] if type(r_index) is int else r_index
@@ -463,7 +508,7 @@ class Dataset:  # Object representing a full Dataset
         if items == None:
             items = list(dictionary.keys())
         if __debug_extended__:
-            print("Using items:", items)
+            print("Using items", items, "for creation")
 
         if not isinstance(dictionary, dict):
             _error("Type Error",
@@ -571,7 +616,6 @@ class Dataset:  # Object representing a full Dataset
         col = list(self.col(c_index))
         for i in index_of(col):
             if filter_method(col[i]):
-                print(i, filter_method(col[i]), col[i].e)
                 self.delete(r_indices=i)
                 self.filter(c_index, filter_method)
                 break
@@ -601,34 +645,81 @@ class Dataset:  # Object representing a full Dataset
         return cpy.deepcopy(self)
 
 
+class Legend_Entry:
+
+    @property
+    def label(self):
+        return self._label
+
+    @label.setter
+    def label(self, new_label):
+        self._label = new_label
+        self.update()
+
+    @property
+    def color(self):
+        return self._color
+
+    @color.setter
+    def color(self, new_color):
+        self._color = new_color
+        self.update()
+
+    def update(self):
+        self.patch = ptc.Patch(color=self._color, label=self.label)
+
+    def __init__(self, name, color):
+        self._label = name
+        self.color = color
+
+
+class Legend:
+    entries = []
+    location = "upper right"
+
+    def __init__(self, location=None, entries=None):
+        if entries is None:
+            entries = {}
+
+        self.entries = entries
+        self.patches = [Legend_Entry(name=entry["name"], color=entry["color"]) for entry in self.entries]
+        if location is not None:
+            self.location = location
+
+
 class Plot:
     point_datasets = []
     curve_datasets = []
     sigma_interval = 1
+    legend = Legend()
 
     @staticmethod
     def _color(index):
-        golden_ratio = (1+mt.sqrt(5))/2
+        golden_ratio = (1 + mt.sqrt(5)) / 2
         if index == 0:
-            return [cls.hsv_to_rgb(1/3, 1, 1)[i] for i in range(3)]
+            return [cls.hsv_to_rgb(1 / 3, 1, 1)[i] for i in range(3)]
 
         last_color = cls.rgb_to_hsv(Plot._color(index - 1)[0], Plot._color(index - 1)[1], Plot._color(index - 1)[2])
-        h = last_color[0] + 1/3
+        h = last_color[0] + 1 / 3
         v = last_color[2]
         s = last_color[1]
         if index % 3 == 0 and index != 0:
-            h += (1/3) / 2**(mt.floor(index/3))
+            h += (1 / 3) / 2 ** (mt.floor(index / 3))
             h = h - mt.floor(h)
             if index % 6 == 0:
-                v -= (1/2) / 2**(mt.floor(index/6))
+                v -= (1 / 2) / 2 ** (mt.floor(index / 6))
             else:
-                s -= (1/2) / 2**(mt.floor(1 + index/6))
-
+                s -= (1 / 2) / 2 ** (mt.floor(1 + index / 6))
 
         return [cls.hsv_to_rgb(h, s, v)[i] for i in range(3)]
 
-    def _update_plt(self):
+    def update_plt(self):
         plt.figure(self.fig)
+        plt.xticks(fontsize=20)
+        plt.yticks(fontsize=20)
+
+        if type(self.sigma_interval) not in [tuple, list]:
+            self.sigma_interval = (self.sigma_interval, self.sigma_interval)
 
         for i in index_of(self.point_datasets):
             dataset = self.point_datasets[i]
@@ -637,9 +728,9 @@ class Plot:
             err_ds = dataset.clone()
             err_ds.filter(1, lambda val: mt.isnan(val.e) or val.e is None)
             plt.errorbar(x=[val.v for val in list(err_ds.col(0))], y=[val.v for val in list(err_ds.col(1))],
-                         yerr=[val.e for val in list(err_ds.col(1))], xerr=[val.e for val in list(err_ds.col(0))],
+                         yerr=[self.sigma_interval[1] * val.e for val in list(err_ds.col(1))],
+                         xerr=[self.sigma_interval[0] * val.e for val in list(err_ds.col(0))],
                          fmt='None', ecolor=self._color(i))
-            err_ds.print()
             plt.scatter([val.v for val in list(dataset.col(0))], [val.v for val in list(dataset.col(1))],
                         marker="x", color=self._color(i))
 
@@ -647,20 +738,24 @@ class Plot:
             dataset = self.curve_datasets[i]
             if dataset is None:
                 continue
-            plt.plot([val.v for val in list(dataset.col(0))], [val.v for val in list(dataset.col(1))], color=self._color(i))
+            plt.plot([val.v for val in list(dataset.col(0))], [val.v for val in list(dataset.col(1))],
+                     color=self._color(i))
 
-        plt.title(self.title, fontsize=30)
+        plt.title(self.title, fontsize=40)
+
         if self.x_label is not None:
             plt.xlabel(self.x_label)
         if self.y_label is not None:
             plt.ylabel(self.y_label)
 
+        self.axes.legend(loc=self.legend.location, handles=[entry.patch for entry in self.legend.patches], fontsize=18)
+
     def show(self):
-        self._update_plt()
+        self.update_plt()
         plt.show()
 
     def save(self, path, dpi=None):
-        self._update_plt()
+        self.update_plt()
         if dpi is None:
             plt.savefig(fname=path)
         else:
@@ -668,11 +763,11 @@ class Plot:
 
     def add_points(self, new_point_dataset):
         self.point_datasets.append(new_point_dataset)
-        self._update_plt()
+        self.update_plt()
 
     def add_curve(self, curve_dataset):
         self.curve_datasets.append(curve_dataset)
-        self._update_plt()
+        self.update_plt()
 
     def __init__(self, point_datasets=None, curve_datasets=None, title="Title", x_label=None, y_label=None):
         if curve_datasets is None:
@@ -694,9 +789,12 @@ class Plot:
         self.point_datasets = point_datasets
         self.curve_datasets = curve_datasets
 
+        self.legend = Legend(entries=[{"name": self.point_datasets[i].y_label,
+                                       "color": self._color(i)} for i in index_of(self.point_datasets)])
+
         # TODO:CHECK ALL LABELS
-        self.x_label = x_label if x_label is not None else self.point_datasets[0].x_label
-        self.y_label = y_label if y_label is not None else self.point_datasets[0].y_label
+        self.x_label = x_label if x_label is not None else self.point_datasets[0].x_name
+        self.y_label = y_label if y_label is not None else self.point_datasets[0].y_name
         for point_dataset in point_datasets:
             point_dataset.x_label = self.x_label
             point_dataset.y_label = self.y_label
@@ -704,17 +802,116 @@ class Plot:
             curve_dataset.x_label = self.x_label
             curve_dataset.y_label = self.y_label
 
+class Covariance_Matrix:
+    #TODO:TEST!
+    def at(self, sigma_dict):
+        return [[self._correlation_matrix[row_i][cell_i] * sigma_dict[self.variables[cell_i]] * sigma_dict[self.variables[row_i]] for cell_i in index_of(self._correlation_matrix[row_i])] for row_i in index_of(self._correlation_matrix)]
+
+    def covariance_coefficient(self, variable_names, sigma):
+        return self._correlation_matrix[self.variables[variable_names[0]]][self.variables[variable_names[1]]] * sigma[0] * sigma[1]
+
+    def resulting_sigma(self, formula, sigma_dict):
+        res = 0
+        for i in index_of(self.variables):
+            for j in index_of(self.variables):
+                res += self.covariance_coefficient((self.variables[i], self.variables[j]), (sigma_dict[self.variables[i]], sigma_dict[self.variables[j]])) * smp.diff(formula.sympy, self.variables[i]) * smp.diff(formula.sympy, self.variables[j])
+
+        return mt.sqrt(res)
+
+    def __init__(self, variable_names, covariance_coefficients):
+        self.variables = variable_names
+        self._correlation_matrix = []
+        for var in variable_names:
+            self._correlation_matrix.append([covariance_coefficients[var + " " + str(var2)] for var2 in variable_names])
+
+        print(self._correlation_matrix)
+
+
+
+class Fit:
+    #TODO: TEST!
+    result = {}
+    fit_formula = None
+    resulting_formula = None
+
+    @property
+    def dataset(self):
+        return self._dataset
+
+    @dataset.setter
+    def dataset(self, new_dataset):
+        self._dataset = new_dataset
+        self.update()
+
+    @staticmethod
+    def _fit_linear(x, y):
+        one_over_sig_sqr = dc.Decimal(0)
+        x_over_sig_sqr = dc.Decimal(0)
+        x_sqr_over_sig_sqr = dc.Decimal(0)
+        x_y_over_sig_sqr = dc.Decimal(0)
+        y_over_sig_sqr = dc.Decimal(0)
+
+        for i in index_of(x):
+            one_over_sig_sqr += dc.Decimal(dc.Decimal(1) / y[i].e ** dc.Decimal(2))
+            x_sqr_over_sig_sqr += dc.Decimal(x[i].v ** 2 / y[i].e ** dc.Decimal(2))
+            x_over_sig_sqr += dc.Decimal(x[i].v / y[i].e ** dc.Decimal(2))
+            x_y_over_sig_sqr += dc.Decimal(x[i].v * y[i].v / y[i].e ** dc.Decimal(2))
+            y_over_sig_sqr += dc.Decimal(y[i].v / y[i].e ** dc.Decimal(2))
+
+        delta = dc.Decimal(one_over_sig_sqr * x_sqr_over_sig_sqr - x_over_sig_sqr ** dc.Decimal(2))
+        m = Val(0)
+        b = Val(0)
+        m.set(dc.Decimal(
+            (dc.Decimal(1) / delta * (one_over_sig_sqr * x_y_over_sig_sqr - x_over_sig_sqr * y_over_sig_sqr))))
+        m.set_err(dc.Decimal(mt.sqrt(dc.Decimal((1) / delta * one_over_sig_sqr))))
+        b.set(dc.Decimal(
+            dc.Decimal(1) / delta * (x_sqr_over_sig_sqr * y_over_sig_sqr - x_over_sig_sqr * x_y_over_sig_sqr)))
+        b.set_err(dc.Decimal(mt.sqrt(dc.Decimal(1) / delta * x_sqr_over_sig_sqr)))
+
+        chi_sqr = Val("0")
+        for i in index_of(x):
+            chi_sqr.v += dc.Decimal((dc.Decimal(1) / y[i].e * (y[i].v - m.v * x[i].v - b.v)) ** dc.Decimal(2))
+
+        return m, b, chi_sqr
+
+    @staticmethod
+    def _fit_chi_squared(x, y):
+        pass
+
+    def update(self):
+        if self.is_linear:
+            self.result["m"], self.result["b"], self.result["chi_squared"] = Fit._fit_linear(self.dataset.col(self.x_index), self.dataset.col(self.y_index))
+        else:
+            pass
+            #self.result = self._fit_chi_squared()
+
+    def formula(self):
+        x_name = "x" if type(self._dataset.get_col_names()[self.x_index]) is int else self._dataset.get_col_names()[self.x_index]
+        return Formula([x_name], latex=str(self.result["m"]) + " * " + x_name + " + " + str(self.result["b"]))
+
+    def __init__(self, dataset, x_index=0, y_index=1, is_linear=True, fit_formula=None):
+        self.fit_formula = fit_formula
+        self._dataset = dataset
+        self.x_index = x_index
+        self.y_index = y_index
+        self.is_linear = is_linear
+        self.update()
+
 
 ##################################################
-
 import random as rnd
 
-# Testing
-ds = [Dataset(lists=[[0, 1, 2, 3], [Val(rnd.randrange(0, 10, 1), str(rnd.randrange(0, 10, 1))) for i in range(4)]]) for j in range(12)]
-plot = Plot(ds, ds, title="Test", y_label="$\\phi$")
-plot.show()
-
-
+# # Testing
+# ds = [Dataset(y_label="$f_" + str(j) + "(x)$",
+#               lists=[[Val(0, 0.1), 1, 2, 3],
+#                      [Val(rnd.randrange(0, 20, 1), str(rnd.randrange(0, 5, 1) + 0.1)) for i in range(4)]]) for j
+#       in range(1)]
+# plot = Plot(ds, ds, title="Test", y_label="$\\phi$ in Tomaten", x_label="$x$ in $6$ Eiern")
+# fit = Fit(ds[0])
+# print(fit.result["m"], fit.result["b"])
+# #print(fit.formula())
+# #plot.add_curve()
+# plot.show()
 ###################################################################################################
 # Best motivateMe() texts:
 # I understand that your physics laboratory courses may be draining and downright boring, but don't let these setbacks deter you from your goals. Your previous progress on the lab report was phenomenal, and that is a true testament to your intelligence and hardworking nature. Though the courses may not be implemented as efficiently as they should be, do not let this dull your passions. Remain focused and committed to your goals, and you will successfully complete the lab report in no time. Keep striving for greatness!
