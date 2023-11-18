@@ -1,6 +1,6 @@
 # ONLY CHANGE STUFF IN THIS SECTION, NOT IN THE OTHER SECTIONS. SET GLOBAL CONTENTS AND SETTINGS HERE
 __debug_lib__ = __debug__  # Weather to show warnings and debug info. Default: __debug__. Change this to False, if you want to hide the librarys internal debug information, even when you debug your application
-__debug_extended__ = True  # Weather to show internal debug info (mainly for debugging the library itself).
+__debug_extended__ = False  # Weather to show internal debug info (mainly for debugging the library itself).
 
 DEC_DGTS = 128  # How many decimal digits (without rounding errors) shall be used.
 #################################################################################################
@@ -52,7 +52,7 @@ plt.rcParams['axes.labelsize'] = 25
 plt.rcParams['xtick.labelsize'] = 14
 plt.rcParams['ytick.labelsize'] = 14
 plt.rcParams['errorbar.capsize'] = 5
-
+plt.rcParams['lines.markersize'] = 10
 
 ########################################################################################################
 # internal Functions
@@ -118,11 +118,10 @@ class Euler_Solver:
         res = [[self.initial_condition[0]], [self.initial_condition[1]]]
 
         client_wants_ds = type(variable_values) is list
-        if not client_wants_ds:
-            variable_values = [variable_values]
-
         if variable_values is not None:
             stop = variable_values[-1]
+            if not client_wants_ds:
+                variable_values = [variable_values]
         else:
             variable_values = []
 
@@ -131,7 +130,7 @@ class Euler_Solver:
         client_values_i = 0
         i = 1
         while True:
-            if variable_values[client_values_i] <= res[0][i-1] + resolution:
+            if len(variable_values) > client_values_i and variable_values[client_values_i] <= res[0][i-1] + resolution:
                 client_values.append(res[1][i-1] + (variable_values[client_values_i] - res[0][i-1])*self.differential_equation.at([[self.variable.n, res[0][i-1]], [self.result_variable.n, res[1][i-1]]]))
                 client_values_i += 1
             res[0].append(res[0][i-1] + resolution)
@@ -142,12 +141,12 @@ class Euler_Solver:
             i += 1
 
         if client_wants_ds:
-            return Dataset(c_names=[self.variable, self.result_variable], lists=[variable_values, client_values])
+            return Dataset(c_names=[self.variable.str, self.result_variable.str], lists=[variable_values, client_values])
 
         if len(client_values) == 1:
             return variable_values[0]
 
-        return Dataset(c_names=[self.variable, self.result_variable], lists=res)
+        return Dataset(c_names=[self.variable.str, self.result_variable.str], lists=res)
 
     def __init__(self, result_variable, variable, differential_equation, initial_condition):
         #tuple initial_condition, MatEx diferential_equation
@@ -193,6 +192,31 @@ class Val:  # Todo: document!
     def __float__(self):
         return float(self.v)
 
+    def __truediv__(self, other):
+        x = Var("x")
+        y = Var("y")
+        return Formula([x], "x/y").at([[x, self], [y, other]], asVal=True)
+
+    def __add__(self, other):
+        x = Var("x")
+        y = Var("y")
+        return Formula([x], "x+y").at([[x, self], [y, other]], asVal=True)
+
+    def __sub__(self, other):
+        x = Var("x")
+        y = Var("y")
+        return Formula([x], "x-y").at([[x, self], [y, other]], asVal=True)
+
+    def __mul__(self, other):
+        x = Var("x")
+        y = Var("y")
+        return Formula([x], "x*y").at([[x, self], [y, other]], asVal=True)
+
+    def __pow__(self, other):
+        x = Var("x")
+        y = Var("y")
+        return Formula([x], "x*y").at([[x, self], [y, other]], asVal=True)
+
     def get(self):
         return cpy.deepcopy(self.v)
 
@@ -214,11 +238,13 @@ class Val:  # Todo: document!
                       "Can't sig_round() Val with error 'NaN' or '0', but got (" + str(val) + ", " + str(err) + ")")
             if val == 0:
                 return ["0"]
+            if val.is_nan():
+                return ["NaN"]
 
             dec_pot = dc.Decimal(mt.floor(mt.log10(abs(val))) - sig_digits - 1)
             val *= dc.Decimal(10 ** -dec_pot)
             val = round(val)
-            return [str(val * dc.Decimal(10 ** dec_pot)) if abs(dec_pot) < 3 else str(val) + " \cdot 10\^{" + str(
+            return [str(val * dc.Decimal(10 ** dec_pot)) if abs(dec_pot) < 3 else str(val) + " \cdot 10^{" + str(
                 dec_pot) + "}"]
 
         if not ignore_errors and (mt.isnan(err) or type(val) == str or type(err) == str):
@@ -241,11 +267,11 @@ class Val:  # Todo: document!
             dec_pot -= 1
 
         err = mt.ceil(err)
-        str_err = str(err) + ("" if dec_pot == 0 else " \cdot 10\^{" + str(dec_pot) + "}")
+        str_err = str(err) + ("" if dec_pot == 0 else " \cdot 10^{" + str(dec_pot) + "}")
 
         val *= dc.Decimal(10 ** -dec_pot)
         val = round(val)
-        str_val = str(val) + ("" if dec_pot == 0 else " \cdot 10\^{" + str(dec_pot) + "}")
+        str_val = str(val) + ("" if dec_pot == 0 else " \cdot 10^{" + str(dec_pot) + "}")
 
         if self.v == 0:
             percent = "NaN"
@@ -263,7 +289,7 @@ class Val:  # Todo: document!
             else:
                 percent *= dc.Decimal(10) ** dc.Decimal(-perc_pot)
                 percent = mt.ceil(percent)
-                percent = str(percent) + " \cdot 10\^{" + str(perc_pot) + "}"
+                percent = str(percent) + " \cdot 10^{" + str(perc_pot) + "}"
 
         return [str_val + " \pm " + str_err + " \: (\pm " + percent + "\%)", str_val, str_err, percent]
 
@@ -281,8 +307,6 @@ class Var:
 
 
 class MatEx:
-    variables = {}
-
     @property
     def sympy(self):
         return self._sympy
@@ -302,11 +326,12 @@ class MatEx:
         self.sympy = l2s2.latex2sympy(new_latex)
 
     def __init__(self, variables, latex="", sympy=None):
+        self.variables = {}
         for var in variables:
             if type(var) is str:
                 self.variables[var] = Var(var)
             else:
-                self.variables[var.n] = var
+                self.variables[var.str] = var
         self.sympy = sympy if sympy is not None else (None if latex == "" else l2s2.latex2sympy(latex))
 
     def __str__(self):
@@ -315,6 +340,9 @@ class MatEx:
     def at(self, var_val_pairs):
         tmp_sympy = self.sympy.doit()
         for var_val_pair in var_val_pairs:
+            if isinstance(var_val_pair[0], Var):
+                var_val_pair[0] = var_val_pair[0].n
+
             tmp_sympy = tmp_sympy.subs(var_val_pair[0], var_val_pair[1])
         return tmp_sympy
 
@@ -332,8 +360,8 @@ class Formula(MatEx):
                 self.variables["\\sigma_" + var] = Var('\\sigma_' + var)
         for key in self.variables.keys():
             if "\\sigma_" not in key:
-                _err += (smp.Derivative(self.sympy, self.variables[key].n) * self.variables["\\sigma_" + key].n) ** 2
-        self.error = MatEx(variables=list(self.variables.keys()), sympy=smp.sympify(smp.sqrt(_err)))
+                _err += (smp.Derivative(self.sympy, self.variables[key].n) * self.variables["\\sigma_" + str(key)].n) ** 2
+        self.error = MatEx(variables=list(list(self.variables.values())), sympy=smp.sympify(smp.sqrt(_err)))
 
         if __debug_extended__:
             print("Updated errors of " + self.latex + " to " + self.error.latex)
@@ -356,17 +384,22 @@ class Formula(MatEx):
     def __str__(self):
         return MatEx.__str__(self) + " \pm " + str(self.error)
 
-    def at(self, var_val_pairs):
+    def at(self, var_val_pairs, asVal=True):
+        for i in index_of(var_val_pairs):
+            if isinstance(var_val_pairs[i][1], Val):
+                var_val_pairs.append([self.variables["\\sigma_" + var_val_pairs[i][0].str], var_val_pairs[i][1].e])
+                var_val_pairs[i][1] = var_val_pairs[i][1].v
+        if asVal:
+            return Val(str(MatEx.at(self, var_val_pairs).evalf()), str(self.error.at(var_val_pairs).evalf()))
         return MatEx.at(self, var_val_pairs), self.error.at(var_val_pairs)
 
     def to_val(self, var_val_pairs):
-        at = self.at(var_val_pairs)
+        at = self.at(var_val_pairs, asVal=False)
         try:
             return Val(str(at[0].evalf()), str(at[1].evalf()))
         except dc.InvalidOperation:
             _error(name="ConversionError",
-                   description="Can't convert sympy (" + str(at[0].evalf()) + "\\pm" + str(at[
-                                                                                               1].evalf()) + ") to Val. Make shure that the specified key-value-pairs are providing values for all used variables, so that the sympy-expressioon can be evaluated to a numeric expression and doesn't contain any unset variables.")
+                   description="Can't convert sympy (" + str(at[0].evalf()) + "\\pm" + str(at[1].evalf()) + ") to Val. Make shure that the specified key-value-pairs are providing values for all used variables, so that the sympy-expressioon can be evaluated to a numeric expression and doesn't contain any unset variables.")
 
     def clone(self):
         return cpy.deepcopy(self)
@@ -416,6 +449,14 @@ class Dataset:  # Object representing a full Dataset
             res = self.frame.iloc[index]
         return res
 
+    def add_column(self, content, name, index=None):
+        if index is None:
+            index = len(self.get_col_names())
+        self.frame.insert(loc=index, column=name, value=content)
+
+    def add_row(self, content):
+        self.frame = pd.concat([self.frame, Dataset(lists=[[c] for c in content],  c_names=self.get_col_names()).frame], axis="index")
+
     def col(self, index):
         try:
             res = self.frame[index]
@@ -424,13 +465,13 @@ class Dataset:  # Object representing a full Dataset
         return list(res)
 
     def at(self, r_index, c_index):
-        r_name = self.get_names([r_index, c_index])[0] if type(r_index) is int else r_index
-        c_name = self.get_names([r_index, c_index])[1] if type(c_index) is int else c_index
+        r_name = r_index if type(r_index) is not int else self.get_names([r_index, c_index])[0]
+        c_name = c_index if type(c_index) is not int else self.get_names([r_index, c_index])[1]
         return self.frame.at[r_name, c_name]
 
     def set(self, r_index, c_index, value):
-        r_name = self.get_names([r_index, c_index])[0] if type(r_index) is int else r_index
-        c_name = self.get_names([r_index, c_index])[1] if type(c_index) is int else c_index
+        r_name = r_index if type(r_index) is not int else self.get_names([r_index, c_index])[0]
+        c_name = c_index if type(c_index) is not int else self.get_names([r_index, c_index])[1]
         self.frame.at[r_name, c_name] = value
 
     def disp_row(self, index):
@@ -440,6 +481,10 @@ class Dataset:  # Object representing a full Dataset
         print(self.col([index]))
 
     def get_names(self, location):
+        for i in index_of(location):
+            if type(location[i]) is not int:
+                location[i] = list(self.frame.columns).index(location[i])
+
         return [self.frame.index[location[0]],
                 self.frame.columns[location[1]]]
 
@@ -455,12 +500,20 @@ class Dataset:  # Object representing a full Dataset
         if c_indices is None:
             c_indices = self.get_col_names()
 
+        if type(r_indices) is not list:
+            r_indices = [r_indices]
+        if type(c_indices) is not list:
+            c_indices = [c_indices]
+
         for r_index in r_indices:
             for c_index in c_indices:
                 self.set(r_index, c_index, method(self.at(r_index, c_index), r_index, c_index))
 
     def print(self):
         print(self.frame)
+
+    def __str__(self):
+        self.print()
 
     def delete(self, c_indices=None, r_indices=None):
         if c_indices is None:
@@ -491,8 +544,8 @@ class Dataset:  # Object representing a full Dataset
             self.frame.drop(columns=c_name, inplace=True)
 
     def bind_error(self, value_col_index, error_col_index):
-        val_col = value_col_index if type(value_col_index) is not int else self.col(value_col_index)
-        err_col = error_col_index if type(error_col_index) is not int else self.col(error_col_index)
+        val_col = self.col(value_col_index)
+        err_col = self.col(error_col_index)
 
         for i in index_of(err_col):
             val_col[i].e = err_col[i].v
@@ -613,6 +666,8 @@ class Dataset:  # Object representing a full Dataset
         self.apply(lambda obj, r_index, c_index: Val.to_val(obj))
 
     def filter(self, c_index, filter_method):
+        if c_index <= len(self.col(c_index)):
+            return
         col = list(self.col(c_index))
         for i in index_of(col):
             if filter_method(col[i]):
@@ -642,7 +697,9 @@ class Dataset:  # Object representing a full Dataset
         return ltx
 
     def clone(self):
-        return cpy.deepcopy(self)
+        res = cpy.deepcopy(self)
+        res.apply(lambda val, x, y: cpy.deepcopy(val))
+        return res
 
 
 class Legend_Entry:
@@ -692,7 +749,8 @@ class Plot:
     curve_datasets = []
     sigma_interval = 1
     legend = Legend()
-
+    bounds = {"x": [None, None],
+              "y": [None, None]}
     @staticmethod
     def _color(index):
         golden_ratio = (1 + mt.sqrt(5)) / 2
@@ -727,11 +785,14 @@ class Plot:
                 continue
             err_ds = dataset.clone()
             err_ds.filter(1, lambda val: mt.isnan(val.e) or val.e is None)
-            plt.errorbar(x=[val.v for val in list(err_ds.col(0))], y=[val.v for val in list(err_ds.col(1))],
+            if len(err_ds.frame.columns) > 0:
+                plt.errorbar(x=[val.v for val in list(err_ds.col(0))], y=[val.v for val in list(err_ds.col(1))],
                          yerr=[self.sigma_interval[1] * val.e for val in list(err_ds.col(1))],
                          xerr=[self.sigma_interval[0] * val.e for val in list(err_ds.col(0))],
                          fmt='None', ecolor=self._color(i))
-            plt.scatter([val.v for val in list(dataset.col(0))], [val.v for val in list(dataset.col(1))],
+
+            if len(dataset.frame.columns) > 0:
+                plt.scatter([val.v for val in list(dataset.col(0))], [val.v for val in list(dataset.col(1))],
                         marker="x", color=self._color(i))
 
         for i in index_of(self.curve_datasets):
@@ -749,6 +810,15 @@ class Plot:
             plt.ylabel(self.y_label)
 
         self.axes.legend(loc=self.legend.location, handles=[entry.patch for entry in self.legend.patches], fontsize=18)
+
+        if self.bounds["x"][0] is not None:
+            plt.xlim(left=self.bounds["x"][0])
+        if self.bounds["x"][1] is not None:
+            plt.xlim(right=self.bounds["x"][1])
+        if self.bounds["y"][0] is not None:
+            plt.ylim(bottom=self.bounds["y"][0])
+        if self.bounds["y"][1] is not None:
+            plt.ylim(top=self.bounds["y"][1])
 
     def show(self):
         self.update_plt()
@@ -768,6 +838,10 @@ class Plot:
     def add_curve(self, curve_dataset):
         self.curve_datasets.append(curve_dataset)
         self.update_plt()
+
+    def update_legend(self):
+        self.legend = Legend(entries=[{"name": self.point_datasets[i].get_col_names()[1],
+                                       "color": self._color(i)} for i in index_of(self.point_datasets)])
 
     def __init__(self, point_datasets=None, curve_datasets=None, title="Title", x_label=None, y_label=None):
         if curve_datasets is None:
@@ -789,12 +863,11 @@ class Plot:
         self.point_datasets = point_datasets
         self.curve_datasets = curve_datasets
 
-        self.legend = Legend(entries=[{"name": self.point_datasets[i].y_label,
-                                       "color": self._color(i)} for i in index_of(self.point_datasets)])
+        self.update_legend()
 
         # TODO:CHECK ALL LABELS
-        self.x_label = x_label if x_label is not None else self.point_datasets[0].x_name
-        self.y_label = y_label if y_label is not None else self.point_datasets[0].y_name
+        self.x_label = x_label if x_label is not None else self.point_datasets[0].get_col_names()[0]
+        self.y_label = y_label if y_label is not None else self.point_datasets[0].get_col_names()[1]
         for point_dataset in point_datasets:
             point_dataset.x_label = self.x_label
             point_dataset.y_label = self.y_label
@@ -887,31 +960,18 @@ class Fit:
 
     def formula(self):
         x_name = "x" if type(self._dataset.get_col_names()[self.x_index]) is int else self._dataset.get_col_names()[self.x_index]
-        return Formula([x_name], latex=str(self.result["m"]) + " * " + x_name + " + " + str(self.result["b"]))
+        return Formula([x_name], latex=self.result["m"].sig_round()[1] + " * " + x_name + " + " + self.result["b"].sig_round()[1])
 
     def __init__(self, dataset, x_index=0, y_index=1, is_linear=True, fit_formula=None):
         self.fit_formula = fit_formula
         self._dataset = dataset
-        self.x_index = x_index
-        self.y_index = y_index
+        self.x_index = x_index if type(x_index) is int else dataset.get_col_names().index(x_index)
+        self.y_index = y_index if type(y_index) is int else dataset.get_col_names().index(y_index)
         self.is_linear = is_linear
         self.update()
 
 
-##################################################
-import random as rnd
 
-# # Testing
-# ds = [Dataset(y_label="$f_" + str(j) + "(x)$",
-#               lists=[[Val(0, 0.1), 1, 2, 3],
-#                      [Val(rnd.randrange(0, 20, 1), str(rnd.randrange(0, 5, 1) + 0.1)) for i in range(4)]]) for j
-#       in range(1)]
-# plot = Plot(ds, ds, title="Test", y_label="$\\phi$ in Tomaten", x_label="$x$ in $6$ Eiern")
-# fit = Fit(ds[0])
-# print(fit.result["m"], fit.result["b"])
-# #print(fit.formula())
-# #plot.add_curve()
-# plot.show()
 ###################################################################################################
 # Best motivateMe() texts:
 # I understand that your physics laboratory courses may be draining and downright boring, but don't let these setbacks deter you from your goals. Your previous progress on the lab report was phenomenal, and that is a true testament to your intelligence and hardworking nature. Though the courses may not be implemented as efficiently as they should be, do not let this dull your passions. Remain focused and committed to your goals, and you will successfully complete the lab report in no time. Keep striving for greatness!
