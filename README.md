@@ -1,4 +1,4 @@
-# PhyPy (Pre-Alpha)
+# PhysicsLab 0.1 (Beta)
 A library based on Pandas, Numpy and Matplotlib to facilitated Physics Labs at the University and evaluation of experimental results in general.
 
 **NOTE**: Be aware that most of this is not that advanced. In fact, most of it are just some handy presets, shortcuts and small modifications, mostly designed to suit my personal needs and preferences.
@@ -8,6 +8,21 @@ may lack some features. If you want to use this nevertheless, welcome aboard.
 
 This is a personal projects (I'm an undergrad physics student, I do this 
 first and foremost to facilitate my own work. I'm no professional software-dev.), no further support, bug fixing or continuation is guaranteed whatsoever.
+
+# Installation
+To get this library to work, you need to install the following python modules:
+- pyppeteer
+- matplotlib
+- numpy
+- pandas
+- latex2sympy2
+- sympy 
+- scipy
+
+Additionally, you need to import (e.g. using pip):
+- Jinja2
+
+On your pc, to be able to use the latex-IO, please make sure to have MikTex installed.
 
 # Documentation
 

@@ -2,7 +2,7 @@
 __debug_lib__ = __debug__  # Weather to show warnings and debug info. Default: __debug__. Change this to False, if you want to hide the librarys internal debug information, even when you debug your application
 __debug_extended__ = False  # Weather to show internal debug info (mainly for debugging the library itself).
 
-DEC_DGTS = 128  # How many decimal digits (without rounding errors) shall be used.
+DEC_DGTS = 64  # How many decimal digits (without rounding errors) shall be used.
 #################################################################################################
 # Init
 ESC_STYLES = {"Error": '\033[41m\033[30m', "Error_txt": '\033[0m\033[31m', "Warning": '\033[43m\033[30m',
@@ -23,8 +23,9 @@ import pandas as pd
 import pandas.io.formats.style as sty
 import latex2sympy2 as l2s2
 import sympy as smp
+import scipy as sp
 
-libs = [asyncio, cls, mt, pt, plt, np, pd, dc, cpy, l2s2, tck, smp]
+libs = [asyncio, cls, mt, pt, plt, np, pd, dc, cpy, l2s2, tck, smp, sp]
 
 if DEC_DGTS <= dc.MAX_PREC:
     dc.getcontext().prec = DEC_DGTS
@@ -53,6 +54,7 @@ plt.rcParams['xtick.labelsize'] = 14
 plt.rcParams['ytick.labelsize'] = 14
 plt.rcParams['errorbar.capsize'] = 5
 plt.rcParams['lines.markersize'] = 10
+
 
 ########################################################################################################
 # internal Functions
@@ -130,18 +132,23 @@ class Euler_Solver:
         client_values_i = 0
         i = 1
         while True:
-            if len(variable_values) > client_values_i and variable_values[client_values_i] <= res[0][i-1] + resolution:
-                client_values.append(res[1][i-1] + (variable_values[client_values_i] - res[0][i-1])*self.differential_equation.at([[self.variable.n, res[0][i-1]], [self.result_variable.n, res[1][i-1]]]))
+            if len(variable_values) > client_values_i and variable_values[client_values_i] <= res[0][
+                i - 1] + resolution:
+                client_values.append(
+                    res[1][i - 1] + (variable_values[client_values_i] - res[0][i - 1]) * self.differential_equation.at(
+                        [[self.variable.n, res[0][i - 1]], [self.result_variable.n, res[1][i - 1]]]))
                 client_values_i += 1
-            res[0].append(res[0][i-1] + resolution)
-            res[1].append(res[1][i-1] + resolution * self.differential_equation.at([[self.variable.n, res[0][i-1]], [self.result_variable.n, res[1][i-1]]]))
+            res[0].append(res[0][i - 1] + resolution)
+            res[1].append(res[1][i - 1] + resolution * self.differential_equation.at(
+                [[self.variable.n, res[0][i - 1]], [self.result_variable.n, res[1][i - 1]]]))
 
             if res[0][i] >= stop:
                 break
             i += 1
 
         if client_wants_ds:
-            return Dataset(c_names=[self.variable.str, self.result_variable.str], lists=[variable_values, client_values])
+            return Dataset(c_names=[self.variable.str, self.result_variable.str],
+                           lists=[variable_values, client_values])
 
         if len(client_values) == 1:
             return variable_values[0]
@@ -149,11 +156,12 @@ class Euler_Solver:
         return Dataset(c_names=[self.variable.str, self.result_variable.str], lists=res)
 
     def __init__(self, result_variable, variable, differential_equation, initial_condition):
-        #tuple initial_condition, MatEx diferential_equation
+        # tuple initial_condition, MatEx diferential_equation
         self.differential_equation = differential_equation
         self.initial_condition = initial_condition
         self.variable = variable
         self.result_variable = result_variable
+
 
 class Val:  # Todo: document!
 
@@ -195,27 +203,27 @@ class Val:  # Todo: document!
     def __truediv__(self, other):
         x = Var("x")
         y = Var("y")
-        return Formula([x], "x/y").at([[x, self], [y, other]], asVal=True)
+        return Formula([x], "x/y").at([[x, self], [y, other]], as_val=True)
 
     def __add__(self, other):
         x = Var("x")
         y = Var("y")
-        return Formula([x], "x+y").at([[x, self], [y, other]], asVal=True)
+        return Formula([x], "x+y").at([[x, self], [y, other]], as_val=True)
 
     def __sub__(self, other):
         x = Var("x")
         y = Var("y")
-        return Formula([x], "x-y").at([[x, self], [y, other]], asVal=True)
+        return Formula([x], "x-y").at([[x, self], [y, other]], as_val=True)
 
     def __mul__(self, other):
         x = Var("x")
         y = Var("y")
-        return Formula([x], "x*y").at([[x, self], [y, other]], asVal=True)
+        return Formula([x], "x*y").at([[x, self], [y, other]], as_val=True)
 
     def __pow__(self, other):
         x = Var("x")
         y = Var("y")
-        return Formula([x], "x*y").at([[x, self], [y, other]], asVal=True)
+        return Formula([x], "x*y").at([[x, self], [y, other]], as_val=True)
 
     def get(self):
         return cpy.deepcopy(self.v)
@@ -229,10 +237,10 @@ class Val:  # Todo: document!
     def set_err(self, val):
         self.e = val
 
-    def sig_round(self, sig_digits=1, ignore_errors=False, additional_digit=True, warn_for_bad_error=True):
+    def sig_round(self, sig_digits=1, additional_digit=True, warn_for_bad_error=True):
         val = self.get()
         err = self.get_err()
-        if err == 0 or mt.isnan(err):
+        if mt.isnan(err) or err <= 0:
             if warn_for_bad_error:
                 _warn("ValueWarning",
                       "Can't sig_round() Val with error 'NaN' or '0', but got (" + str(val) + ", " + str(err) + ")")
@@ -247,7 +255,7 @@ class Val:  # Todo: document!
             return [str(val * dc.Decimal(10 ** dec_pot)) if abs(dec_pot) < 3 else str(val) + " \cdot 10^{" + str(
                 dec_pot) + "}"]
 
-        if not ignore_errors and (mt.isnan(err) or type(val) == str or type(err) == str):
+        if mt.isnan(err) or type(val) is str or type(err) is str:
             _error("Invalid Value",
                    "Can only sig_round Vals with well-defined values and error, but got " + str(val) + ", " + str(err))
             return
@@ -276,7 +284,7 @@ class Val:  # Todo: document!
         if self.v == 0:
             percent = "NaN"
         else:
-            percent = dc.Decimal(100) * self.e / self.v
+            percent = abs(dc.Decimal(100) * self.e / self.v)
             perc_pot = mt.floor(mt.log10(percent)) - 1
             if abs(perc_pot + 1) <= 3:
                 if perc_pot >= 0:
@@ -305,6 +313,9 @@ class Var:
     def __str__(self):
         return self.str
 
+    def __float__(self):
+        return self.n
+
 
 class MatEx:
     @property
@@ -315,11 +326,11 @@ class MatEx:
     def sympy(self, new_sympy):
         self._raw_sympy = new_sympy
         self._sympy = self._raw_sympy.doit()
-        self._latex = l2s2.latex(self.sympy)
+        self._latex = l2s2.latex(self._sympy)
 
     @property
     def latex(self):
-        return self._latex
+        return "$" + self._latex + "$"
 
     @latex.setter
     def latex(self, new_latex):
@@ -338,7 +349,7 @@ class MatEx:
         return self.latex
 
     def at(self, var_val_pairs):
-        tmp_sympy = self.sympy.doit()
+        tmp_sympy = self._sympy.doit()
         for var_val_pair in var_val_pairs:
             if isinstance(var_val_pair[0], Var):
                 var_val_pair[0] = var_val_pair[0].n
@@ -360,46 +371,99 @@ class Formula(MatEx):
                 self.variables["\\sigma_" + var] = Var('\\sigma_' + var)
         for key in self.variables.keys():
             if "\\sigma_" not in key:
-                _err += (smp.Derivative(self.sympy, self.variables[key].n) * self.variables["\\sigma_" + str(key)].n) ** 2
+                _err += (smp.Derivative(self.sympy, self.variables[key].n) * self.variables[
+                    "\\sigma_" + str(key)].n) ** 2
         self.error = MatEx(variables=list(list(self.variables.values())), sympy=smp.sympify(smp.sqrt(_err)))
 
         if __debug_extended__:
             print("Updated errors of " + self.latex + " to " + self.error.latex)
 
-    @MatEx.sympy.setter
+    @property
+    def error(self):
+        err = cpy.deepcopy(self._error)
+        for key in self.preset_variables.keys():
+            err.sympy = err.sympy.subs(self.variables[key].n, self.preset_variables[key])
+        return err
+
+    @error.setter
+    def error(self, new_error):
+        self._error = new_error
+
+    @property
+    def sympy(self):
+        # in order to take into account preset variables
+        preset_sympy = self._sympy
+        for key in self.preset_variables.keys():
+            preset_sympy = preset_sympy.subs(self.variables[key].n, self.preset_variables[key])
+        return preset_sympy
+
+    @sympy.setter
     def sympy(self, new_sympy):
         MatEx.sympy.fset(self, new_sympy)
         self.update_errors()
 
-    @MatEx.latex.setter
+    @property
+    def latex(self):
+        # in order to take into account preset variables
+        frml = self.clone()
+        for key in self.preset_variables.keys():
+            frml.sympy = frml.sympy.subs(self.variables[key].n, self.preset_variables[key])
+        for atom in frml.sympy.atoms(smp.Float):
+            frml.sympy = frml.sympy.subs(atom, smp.N(atom, 1))
+
+        frml.sympy = smp.sympify(frml.sympy)
+        return "$" + frml._latex + "$"
+
+    @latex.setter
     def latex(self, new_latex):
         MatEx.latex.fset(self, new_latex)
         self.update_errors()
 
     def __init__(self, variables=None, latex="", sympy=None):
+        self.error = None
+        self.preset_variables = {}
         if variables is None:
             variables = []
         MatEx.__init__(self, variables, latex, sympy)
 
     def __str__(self):
-        return MatEx.__str__(self) + " \pm " + str(self.error)
+        ret_err = self.error.sympy
+        ret_err = ret_err.doit()
+        ret_err = smp.sympify(ret_err)
+        for atom in ret_err.atoms(smp.Float):
+            ret_err = ret_err.subs(atom, smp.N(atom, 1))
 
-    def at(self, var_val_pairs, asVal=True):
+        return self.latex[1:-1] + " \pm " + smp.latex(ret_err)
+
+    def at(self, var_val_pairs, as_val=True):
+        for variable in self.preset_variables.keys():
+            var_val_pairs.append([self.variables[variable], self.preset_variables[variable]])
         for i in index_of(var_val_pairs):
             if isinstance(var_val_pairs[i][1], Val):
                 var_val_pairs.append([self.variables["\\sigma_" + var_val_pairs[i][0].str], var_val_pairs[i][1].e])
                 var_val_pairs[i][1] = var_val_pairs[i][1].v
-        if asVal:
+
+        if as_val:
             return Val(str(MatEx.at(self, var_val_pairs).evalf()), str(self.error.at(var_val_pairs).evalf()))
+        if self.error is None:
+            return MatEx.at(self, var_val_pairs), None
         return MatEx.at(self, var_val_pairs), self.error.at(var_val_pairs)
 
+    def set_variables(self, var_val_pairs):
+        for var_val_pair in var_val_pairs:
+            val = cpy.deepcopy(var_val_pair[1])
+            val.e = dc.Decimal("NaN")
+            self.preset_variables[var_val_pair[0].str] = val.v
+            self.preset_variables["\\sigma_" + var_val_pair[0].str] = var_val_pair[1].e
+
     def to_val(self, var_val_pairs):
-        at = self.at(var_val_pairs, asVal=False)
+        at = self.at(var_val_pairs, as_val=False)
         try:
             return Val(str(at[0].evalf()), str(at[1].evalf()))
         except dc.InvalidOperation:
             _error(name="ConversionError",
-                   description="Can't convert sympy (" + str(at[0].evalf()) + "\\pm" + str(at[1].evalf()) + ") to Val. Make shure that the specified key-value-pairs are providing values for all used variables, so that the sympy-expressioon can be evaluated to a numeric expression and doesn't contain any unset variables.")
+                   description="Can't convert sympy (" + str(at[0].evalf()) + "\\pm" + str(at[
+                                                                                               1].evalf()) + ") to Val. Make shure that the specified key-value-pairs are providing values for all used variables, so that the sympy-expressioon can be evaluated to a numeric expression and doesn't contain any unset variables.")
 
     def clone(self):
         return cpy.deepcopy(self)
@@ -414,8 +478,16 @@ class Formula(MatEx):
 
         err_label = "\sigma_{" + val_label + "}"
         data = {var: var_values, val_label: []}
+        preset_sympy = self.sympy.subs(self.variables["\\sigma_" + var].n, 0)
+        # for key in self.preset_variables.keys():
+        #     preset_sympy = preset_sympy.subs(self.variables[key].n, self.preset_variables[key])
+        preset_err_sympy = self.error.sympy.subs(self.variables["\\sigma_" + var].n, 0)
+        for key in self.preset_variables.keys():
+            preset_err_sympy.subs(self.variables[key].n, self.preset_variables[key])
+        fast_val = smp.utilities.lambdify(self.variables[var].n, preset_sympy)
+        fast_err = smp.utilities.lambdify(self.variables[var].n, preset_err_sympy)
         for var_val in var_values:
-            val = self.to_val([[var, var_val], ["\\sigma_" + var, 0]])
+            val = Val(fast_val(var_val), str(fast_err(var_val)))#self.at([[var, var_val], ["\\sigma_" + var, 0]], as_val=True)
             if val.e == 0:
                 val.e = dc.Decimal("NaN")
             data[val_label].append(val)
@@ -427,7 +499,9 @@ class Dataset:  # Object representing a full Dataset
     frame = pd.DataFrame()
 
     def __init__(self, x_label=None, y_label=None, dictionary=None, lists=None, csv_path=None, r_names=None,
-                 c_names=None, val_err_index_pairs=None):
+                 c_names=None, val_err_index_pairs=None, title=None):
+        self.title = title
+        self.plot_color = None
         if val_err_index_pairs is None:
             val_err_index_pairs = []
         if dictionary is not None:
@@ -455,7 +529,8 @@ class Dataset:  # Object representing a full Dataset
         self.frame.insert(loc=index, column=name, value=content)
 
     def add_row(self, content):
-        self.frame = pd.concat([self.frame, Dataset(lists=[[c] for c in content],  c_names=self.get_col_names()).frame], axis="index")
+        self.frame = pd.concat([self.frame, Dataset(lists=[[c] for c in content], c_names=self.get_col_names()).frame],
+                               axis="index")
 
     def col(self, index):
         try:
@@ -511,9 +586,6 @@ class Dataset:  # Object representing a full Dataset
 
     def print(self):
         print(self.frame)
-
-    def __str__(self):
-        self.print()
 
     def delete(self, c_indices=None, r_indices=None):
         if c_indices is None:
@@ -646,7 +718,7 @@ class Dataset:  # Object representing a full Dataset
         shp = temp.shape
         for r in range(shp[0]):
             for c in range(shp[1]):
-                temp.loc[r][c] = Val.to_val(temp.loc[r][c])
+                temp.iloc[r].iloc[c] = Val.to_val(temp.iloc[r].iloc[c])
 
         for k in modify_cols.keys():
             for i in index_of(temp.get[k]):
@@ -656,12 +728,12 @@ class Dataset:  # Object representing a full Dataset
             for i in index_of(temp.loc[k]):
                 temp.loc[k][i] = modify_rows[k](temp.loc[k][i])
 
-        if userows is not None:
+        if userows is None:
             userows = range(shp[0])
-        if usecols is not None:
+        if usecols is None:
             usecols = range(shp[1])
 
-        temp = temp[[col for col in usecols]]
+        temp = temp.iloc[:, [col for col in usecols]]
         self.frame = temp.loc[userows]
         self.apply(lambda obj, r_index, c_index: Val.to_val(obj))
 
@@ -731,9 +803,6 @@ class Legend_Entry:
 
 
 class Legend:
-    entries = []
-    location = "upper right"
-
     def __init__(self, location=None, entries=None):
         if entries is None:
             entries = {}
@@ -742,15 +811,12 @@ class Legend:
         self.patches = [Legend_Entry(name=entry["name"], color=entry["color"]) for entry in self.entries]
         if location is not None:
             self.location = location
+        else:
+            self.location = "upper right"
 
 
 class Plot:
-    point_datasets = []
-    curve_datasets = []
-    sigma_interval = 1
-    legend = Legend()
-    bounds = {"x": [None, None],
-              "y": [None, None]}
+
     @staticmethod
     def _color(index):
         golden_ratio = (1 + mt.sqrt(5)) / 2
@@ -787,20 +853,20 @@ class Plot:
             err_ds.filter(1, lambda val: mt.isnan(val.e) or val.e is None)
             if len(err_ds.frame.columns) > 0:
                 plt.errorbar(x=[val.v for val in list(err_ds.col(0))], y=[val.v for val in list(err_ds.col(1))],
-                         yerr=[self.sigma_interval[1] * val.e for val in list(err_ds.col(1))],
-                         xerr=[self.sigma_interval[0] * val.e for val in list(err_ds.col(0))],
-                         fmt='None', ecolor=self._color(i))
+                             yerr=[self.sigma_interval[1] * val.e for val in list(err_ds.col(1))],
+                             xerr=[self.sigma_interval[0] * val.e for val in list(err_ds.col(0))],
+                             fmt='None', ecolor=self._color(i))
 
             if len(dataset.frame.columns) > 0:
                 plt.scatter([val.v for val in list(dataset.col(0))], [val.v for val in list(dataset.col(1))],
-                        marker="x", color=self._color(i))
+                            marker="x", color=Plot._color(i) if dataset.plot_color is None else dataset.plot_color)
 
         for i in index_of(self.curve_datasets):
             dataset = self.curve_datasets[i]
             if dataset is None:
                 continue
             plt.plot([val.v for val in list(dataset.col(0))], [val.v for val in list(dataset.col(1))],
-                     color=self._color(i))
+                     color=Plot._color(i) if dataset.plot_color is None else dataset.plot_color)
 
         plt.title(self.title, fontsize=40)
 
@@ -809,7 +875,8 @@ class Plot:
         if self.y_label is not None:
             plt.ylabel(self.y_label)
 
-        self.axes.legend(loc=self.legend.location, handles=[entry.patch for entry in self.legend.patches], fontsize=18)
+        if len(self.legend.patches) > 0:
+            self.axes.legend(loc=self.legend.location, handles=[entry.patch for entry in self.legend.patches], fontsize=18)
 
         if self.bounds["x"][0] is not None:
             plt.xlim(left=self.bounds["x"][0])
@@ -840,8 +907,11 @@ class Plot:
         self.update_plt()
 
     def update_legend(self):
-        self.legend = Legend(entries=[{"name": self.point_datasets[i].get_col_names()[1],
-                                       "color": self._color(i)} for i in index_of(self.point_datasets)])
+        entries = [{"name": self.point_datasets[i].title,
+                                       "color": Plot._color(i) if self.point_datasets[i].plot_color is None else self.point_datasets[i].plot_color} for i in index_of(self.point_datasets)]
+        entries += [{"name": self.curve_datasets[i].title,
+                                       "color": Plot._color(i) if self.curve_datasets[i].plot_color is None else self.curve_datasets[i].plot_color} for i in index_of(self.curve_datasets)]
+        self.legend = Legend(entries=entries)
 
     def __init__(self, point_datasets=None, curve_datasets=None, title="Title", x_label=None, y_label=None):
         if curve_datasets is None:
@@ -862,6 +932,10 @@ class Plot:
         self.axes.yaxis.set_minor_locator(tck.AutoMinorLocator(4))
         self.point_datasets = point_datasets
         self.curve_datasets = curve_datasets
+        self.sigma_interval = 1
+        self.legend = Legend()
+        self.bounds = {"x": [None, None],
+                  "y": [None, None]}
 
         self.update_legend()
 
@@ -875,37 +949,53 @@ class Plot:
             curve_dataset.x_label = self.x_label
             curve_dataset.y_label = self.y_label
 
+
 class Covariance_Matrix:
-    #TODO:TEST!
-    def at(self, sigma_dict):
-        return [[self._correlation_matrix[row_i][cell_i] * sigma_dict[self.variables[cell_i]] * sigma_dict[self.variables[row_i]] for cell_i in index_of(self._correlation_matrix[row_i])] for row_i in index_of(self._correlation_matrix)]
+
+    def inverse(self, sigma_list):
+        return np.linalg.inv(self.at(sigma_list))
+
+    def at(self, sigma_list, as_list=False):
+        arr = [[self._correlation_matrix[row_i][cell_i] * sigma_list[cell_i] * sigma_list[row_i] for cell_i in
+                index_of(self._correlation_matrix[row_i])] for row_i in index_of(self._correlation_matrix)]
+        if as_list:
+            return arr
+        return np.matrix(arr)
 
     def covariance_coefficient(self, variable_names, sigma):
-        return self._correlation_matrix[self.variables[variable_names[0]]][self.variables[variable_names[1]]] * sigma[0] * sigma[1]
+        return self._correlation_matrix[self.variables[variable_names[0]]][self.variables[variable_names[1]]] * sigma[
+            0] * sigma[1]
 
-    def resulting_sigma(self, formula, sigma_dict):
+    def resulting_sigma(self, formula, sigma_list):
         res = 0
         for i in index_of(self.variables):
             for j in index_of(self.variables):
-                res += self.covariance_coefficient((self.variables[i], self.variables[j]), (sigma_dict[self.variables[i]], sigma_dict[self.variables[j]])) * smp.diff(formula.sympy, self.variables[i]) * smp.diff(formula.sympy, self.variables[j])
+                res += self.covariance_coefficient((self.variables[i], self.variables[j]),
+                                                   (sigma_list[i], sigma_list[j])) * smp.diff(formula.sympy,
+                                                                                              self.variables[
+                                                                                                  i]) * smp.diff(
+                    formula.sympy, self.variables[j])
 
         return mt.sqrt(res)
 
-    def __init__(self, variable_names, covariance_coefficients):
+    def __init__(self, variable_names, covariance_coefficients=None):
         self.variables = variable_names
         self._correlation_matrix = []
+        if covariance_coefficients is None:
+            covariance_coefficients = {}
         for var in variable_names:
-            self._correlation_matrix.append([covariance_coefficients[var + " " + str(var2)] for var2 in variable_names])
+            self._correlation_matrix.append([])
+            for var2 in variable_names:
+                try:
+                    self._correlation_matrix[-1].append(covariance_coefficients[str(var) + " " + str(var2)])
+                except KeyError:
+                    self._correlation_matrix[-1].append(1 if str(var) is str(var2) else 0)
 
-        print(self._correlation_matrix)
-
+        self.numpy = np.matrix(self._correlation_matrix)
 
 
 class Fit:
-    #TODO: TEST!
-    result = {}
-    fit_formula = None
-    resulting_formula = None
+    # TODO: TEST!
 
     @property
     def dataset(self):
@@ -917,7 +1007,7 @@ class Fit:
         self.update()
 
     @staticmethod
-    def _fit_linear(x, y):
+    def fit_linear(x, y):
         one_over_sig_sqr = dc.Decimal(0)
         x_over_sig_sqr = dc.Decimal(0)
         x_sqr_over_sig_sqr = dc.Decimal(0)
@@ -948,29 +1038,123 @@ class Fit:
         return m, b, chi_sqr
 
     @staticmethod
-    def _fit_chi_squared(x, y):
-        pass
+    def _fit_chi_squared_untested_algebraic(x, y, formula, estimated_parameters, precision, x_variable, fit_variables,
+                                            covariance_matrix):
+        D = np.matrix([[Formula(formula.variables, sympy=smp.diff(formula.at([x_variable, x[i]]), fit_variables[j])).at(
+            [[fit_variables[k], estimated_parameters[k]] for k in index_of(fit_variables)], as_val=True).v for i in
+                        index_of(x)] for j in index_of(fit_variables)])
+        var_val_pairs = [[fit_variables[i], estimated_parameters[i]] for i in index_of(estimated_parameters)]
+        f = np.matrix(
+            [formula.at([cpy.deepcopy(var_val_pairs).append([x_variable, x[k]])], as_val=True).v for k in index_of(x)])
+
+        residual = np.subtract(np.matrix([y]), f)
+        delta_a = np.matmul(D.transpose(), np.linalg.inv(covariance_matrix))
+        delta_a = np.matmul(delta_a, D)
+        delta_a = np.matmul(np.linalg.inv(delta_a), D.transpose())
+        delta_a = np.matmul(delta_a, np.linalg.inv(covariance_matrix))
+        delta_a = np.matmul(delta_a, residual)
+
+        length_delta_a = 0
+        for component in delta_a[0]:
+            length_delta_a += component ** 2
+
+        length_delta_a = np.sqrt(length_delta_a)
+        new_a = list(np.add(estimated_parameters, delta_a[0]))
+        if length_delta_a < precision:
+            M = np.matrix([y])
+            M = np.subtract(M, np.matmul(D, delta_a))
+            M = np.subtract(M, f)
+            chi_squared = np.matmul(M.transpose(), np.linalg.inv(covariance_matrix))
+            chi_squared = np.matmul(chi_squared, M)
+
+            if abs(chi_squared - len(x) + len(fit_variables)) < precision * chi_squared:
+                covariance_matrix_a = D.transpose()
+                covariance_matrix_a = np.matmul(covariance_matrix_a, np.linalg.inv(covariance_matrix))
+                covariance_matrix_a = np.matmul(covariance_matrix_a, D)
+                covariance_matrix_a = np.linalg.inv(covariance_matrix_a)
+                return new_a, covariance_matrix_a
+        else:
+            Fit.fit_chi_squared(x, y, formula, new_a, precision, x_variable, fit_variables, covariance_matrix)
+
+    def fit_chi_squared(self, x, y, formula, estimated_parameters, x_variable, fit_variables, covariance_matrix, bounds):
+        covariance_matrix = covariance_matrix.at([y_val.e for y_val in y])
+        vars = [x_variable.n]
+
+        for variable in fit_variables:
+            vars.append(variable.n)
+        if estimated_parameters is None:
+            estimated_parameters = [1 for p in fit_variables]
+        if bounds is None:
+            bounds = ([-mt.inf for p in fit_variables], [mt.inf for p in fit_variables])
+
+        diffs = [smp.utilities.lambdify(vars, smp.diff(formula.sympy, var)) for var in vars[1:]]
+        def jacobi(*args):
+            res_list = []
+            for x in args[0]:
+                args_cpy = list(args)
+                args_cpy[0] = x
+                args_cpy = tuple(args_cpy)
+                res = []
+                for i in index_of(args[1:]):
+                    res.append(diffs[i](*args_cpy))
+                res_list.append(res)
+            return res_list
+
+        resulting_params, cov_mat, info_dict, mesg, ier = sp.optimize.curve_fit(
+            smp.utilities.lambdify(vars, formula.sympy), [x_val.v for x_val in x], [y_val.v for y_val in y],
+            estimated_parameters, sigma=covariance_matrix, absolute_sigma=True, full_output=True, bounds=bounds, jac=jacobi)
+        chi_squared = 0
+        for i in index_of(resulting_params):
+            chi_squared += info_dict["fvec"][i] ** 2
+        for i in index_of(resulting_params):
+            resulting_params[i] = Val(resulting_params[i], np.sqrt(np.diag(cov_mat))[i])
+        return resulting_params, chi_squared, cov_mat
 
     def update(self):
         if self.is_linear:
-            self.result["m"], self.result["b"], self.result["chi_squared"] = Fit._fit_linear(self.dataset.col(self.x_index), self.dataset.col(self.y_index))
+            self.result["m"], self.result["b"], self.result["chi_squared"] = Fit.fit_linear(
+                self.dataset.col(self.x_index), self.dataset.col(self.y_index))
         else:
-            pass
-            #self.result = self._fit_chi_squared()
+            params, chi_squared, cov_mat = self.fit_chi_squared(self.dataset.col(self.x_index),
+                                                                self.dataset.col(self.y_index), self.fit_formula,
+                                                                self.estimated_parameters, self.x_variable,
+                                                                self.fit_variables, self.covariance_matrix, self.bounds)
+            for i in index_of(params):
+                self.result[self.fit_variables[i].str] = Val(params[i], np.sqrt(np.diag(cov_mat))[i])
+
+            self.result["chi_squared"] = chi_squared
+            self.result["chi_squared_over_n_minus_p"] = chi_squared / (
+                        len(self.dataset.col(self.x_index)) - len(self.fit_variables))
+            self.result["covariance_matrix"] = cov_mat
 
     def formula(self):
-        x_name = "x" if type(self._dataset.get_col_names()[self.x_index]) is int else self._dataset.get_col_names()[self.x_index]
-        return Formula([x_name], latex=self.result["m"].sig_round()[1] + " * " + x_name + " + " + self.result["b"].sig_round()[1])
+        if self.is_linear:
+            x_name = "x" if type(self._dataset.get_col_names()[self.x_index]) is int else self._dataset.get_col_names()[
+                self.x_index]
+            return Formula([x_name], latex=self.result["m"].sig_round()[1] + " * " + x_name + " + " +
+                                           self.result["b"].sig_round()[1])
+        else:
+            var_val_pairs = [[self.fit_variables[i], self.result[self.fit_variables[i].str]]
+                             for i in index_of(self.fit_variables)]
+            res = self.fit_formula.clone()
+            res.set_variables(var_val_pairs)
+            return res
 
-    def __init__(self, dataset, x_index=0, y_index=1, is_linear=True, fit_formula=None):
+    def __init__(self, dataset, x_index=0, y_index=1, is_linear=True, fit_formula=None, x_variable=None,
+                 fit_variables=None, covariance_matrix=None, estimated_parameters=None, bounds=None):
+
+        self.result = {}
         self.fit_formula = fit_formula
         self._dataset = dataset
         self.x_index = x_index if type(x_index) is int else dataset.get_col_names().index(x_index)
         self.y_index = y_index if type(y_index) is int else dataset.get_col_names().index(y_index)
         self.is_linear = is_linear
+        self.x_variable = x_variable
+        self.fit_variables = fit_variables
+        self.covariance_matrix = covariance_matrix
+        self.estimated_parameters = estimated_parameters
+        self.bounds = bounds
         self.update()
-
-
 
 ###################################################################################################
 # Best motivateMe() texts:
