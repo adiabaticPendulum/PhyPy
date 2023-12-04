@@ -117,7 +117,7 @@ def invert_list(list):
 class Euler_Solver:
 
     def evaluate(self, resolution, stop=None, variable_values=None):
-        res = [[self.initial_condition[0]], [self.initial_condition[1]]]
+        res = [[self.initial_condition[i]] for i in index_of(self.initial_condition)]
 
         client_wants_ds = type(variable_values) is list
         if variable_values is not None:
@@ -128,39 +128,44 @@ class Euler_Solver:
             variable_values = []
 
         variable_values.sort()
-        client_values = []
+        client_values = [[]] + [[] for var in self.result_variables]
         client_values_i = 0
         i = 1
         while True:
+            args = {self.variable.n: res[0][i - 1]}
+            for k in index_of(self.result_variables):
+                args[self.result_variables[k].n] = res[1 + k][i - 1]
             if len(variable_values) > client_values_i and variable_values[client_values_i] <= res[0][
                 i - 1] + resolution:
-                client_values.append(
-                    res[1][i - 1] + (variable_values[client_values_i] - res[0][i - 1]) * self.differential_equation.at(
-                        [[self.variable.n, res[0][i - 1]], [self.result_variable.n, res[1][i - 1]]]))
+                client_values[0].append(variable_values[client_values_i])
+                for j in index_of(self.result_variables):
+                    client_values[1+j].append(res[1+j][i - 1] + (variable_values[client_values_i] - res[0][i - 1]) * self.differential_equations[j].sympy.xreplace(args))
+
                 client_values_i += 1
             res[0].append(res[0][i - 1] + resolution)
-            res[1].append(res[1][i - 1] + resolution * self.differential_equation.at(
-                [[self.variable.n, res[0][i - 1]], [self.result_variable.n, res[1][i - 1]]]))
+            for j in index_of(self.result_variables):
+                res[1+j].append(res[1+j][i - 1] + resolution * self.differential_equations[j].sympy.xreplace(args))
 
             if res[0][i] >= stop:
                 break
             i += 1
 
+
         if client_wants_ds:
-            return Dataset(c_names=[self.variable.str, self.result_variable.str],
-                           lists=[variable_values, client_values])
+            return Dataset(c_names=[self.variable.str] + [var.str for var in self.result_variables],
+                           lists= client_values)
 
         if len(client_values) == 1:
             return variable_values[0]
 
-        return Dataset(c_names=[self.variable.str, self.result_variable.str], lists=res)
+        return Dataset(c_names=[self.variable.str] + [var.str for var in self.result_variables], lists=res)
 
-    def __init__(self, result_variable, variable, differential_equation, initial_condition):
+    def __init__(self, result_variables, variable, differential_equations, initial_condition):
         # tuple initial_condition, MatEx diferential_equation
-        self.differential_equation = differential_equation
+        self.differential_equations = differential_equations
         self.initial_condition = initial_condition
         self.variable = variable
-        self.result_variable = result_variable
+        self.result_variables = result_variables
 
 
 class Val:  # Todo: document!
@@ -203,27 +208,27 @@ class Val:  # Todo: document!
     def __truediv__(self, other):
         x = Var("x")
         y = Var("y")
-        return Formula([x], "x/y").at([[x, self], [y, other]], as_val=True)
+        return Formula([x, y], "x/y").at([[x, self], [y, other]], as_val=True)
 
     def __add__(self, other):
         x = Var("x")
         y = Var("y")
-        return Formula([x], "x+y").at([[x, self], [y, other]], as_val=True)
+        return Formula([x, y], "x+y").at([[x, self], [y, other]], as_val=True)
 
     def __sub__(self, other):
         x = Var("x")
         y = Var("y")
-        return Formula([x], "x-y").at([[x, self], [y, other]], as_val=True)
+        return Formula([x, y], "x-y").at([[x, self], [y, other]], as_val=True)
 
     def __mul__(self, other):
         x = Var("x")
         y = Var("y")
-        return Formula([x], "x*y").at([[x, self], [y, other]], as_val=True)
+        return Formula([x, y], "x*y").at([[x, self], [y, other]], as_val=True)
 
     def __pow__(self, other):
         x = Var("x")
         y = Var("y")
-        return Formula([x], "x*y").at([[x, self], [y, other]], as_val=True)
+        return Formula([x, y], "x*y").at([[x, self], [y, other]], as_val=True)
 
     def get(self):
         return cpy.deepcopy(self.v)
@@ -367,12 +372,12 @@ class Formula(MatEx):
     def update_errors(self):
         _err = 0
         for var in list(self.variables.keys()):
-            if "\\sigma_" not in var and "\\sigma_" + var not in list(self.variables.keys()):
-                self.variables["\\sigma_" + var] = Var('\\sigma_' + var)
+            if "\\sigma_{" not in var and "\\sigma_{" + var + "}" not in list(self.variables.keys()):
+                self.variables["\\sigma_{" + var + "}"] = Var('\\sigma_{' + var + '}')
         for key in self.variables.keys():
-            if "\\sigma_" not in key:
+            if "\\sigma_{" not in key:
                 _err += (smp.Derivative(self.sympy, self.variables[key].n) * self.variables[
-                    "\\sigma_" + str(key)].n) ** 2
+                    "\\sigma_{" + str(key)+"}"].n) ** 2
         self.error = MatEx(variables=list(list(self.variables.values())), sympy=smp.sympify(smp.sqrt(_err)))
 
         if __debug_extended__:
@@ -412,6 +417,7 @@ class Formula(MatEx):
             frml.sympy = frml.sympy.subs(atom, smp.N(atom, 1))
 
         frml.sympy = smp.sympify(frml.sympy)
+        frml.sympy = smp.simplify(frml.sympy)
         return "$" + frml._latex + "$"
 
     @latex.setter
@@ -420,8 +426,9 @@ class Formula(MatEx):
         self.update_errors()
 
     def __init__(self, variables=None, latex="", sympy=None):
-        self.error = None
+
         self.preset_variables = {}
+        self.error = None
         if variables is None:
             variables = []
         MatEx.__init__(self, variables, latex, sympy)
@@ -430,6 +437,7 @@ class Formula(MatEx):
         ret_err = self.error.sympy
         ret_err = ret_err.doit()
         ret_err = smp.sympify(ret_err)
+        ret_err = smp.simplify(ret_err)
         for atom in ret_err.atoms(smp.Float):
             ret_err = ret_err.subs(atom, smp.N(atom, 1))
 
@@ -439,8 +447,8 @@ class Formula(MatEx):
         for variable in self.preset_variables.keys():
             var_val_pairs.append([self.variables[variable], self.preset_variables[variable]])
         for i in index_of(var_val_pairs):
-            if isinstance(var_val_pairs[i][1], Val):
-                var_val_pairs.append([self.variables["\\sigma_" + var_val_pairs[i][0].str], var_val_pairs[i][1].e])
+            if isinstance(var_val_pairs[i][1], Val) and "\\sigma_{" not in var_val_pairs[i][0].str:
+                var_val_pairs.append([self.variables["\\sigma_{" + var_val_pairs[i][0].str + "}"], var_val_pairs[i][1].e])
                 var_val_pairs[i][1] = var_val_pairs[i][1].v
 
         if as_val:
@@ -454,7 +462,7 @@ class Formula(MatEx):
             val = cpy.deepcopy(var_val_pair[1])
             val.e = dc.Decimal("NaN")
             self.preset_variables[var_val_pair[0].str] = val.v
-            self.preset_variables["\\sigma_" + var_val_pair[0].str] = var_val_pair[1].e
+            self.preset_variables["\\sigma_{" + var_val_pair[0].str + "}"] = var_val_pair[1].e
 
     def to_val(self, var_val_pairs):
         at = self.at(var_val_pairs, as_val=False)
@@ -478,16 +486,16 @@ class Formula(MatEx):
 
         err_label = "\sigma_{" + val_label + "}"
         data = {var: var_values, val_label: []}
-        preset_sympy = self.sympy.subs(self.variables["\\sigma_" + var].n, 0)
+        preset_sympy = self.sympy.subs(self.variables["\\sigma_{" + var + "}"].n, 0)
         # for key in self.preset_variables.keys():
         #     preset_sympy = preset_sympy.subs(self.variables[key].n, self.preset_variables[key])
-        preset_err_sympy = self.error.sympy.subs(self.variables["\\sigma_" + var].n, 0)
+        preset_err_sympy = self.error.sympy.subs(self.variables["\\sigma_{" + var + "}"].n, 0)
         for key in self.preset_variables.keys():
             preset_err_sympy.subs(self.variables[key].n, self.preset_variables[key])
         fast_val = smp.utilities.lambdify(self.variables[var].n, preset_sympy)
         fast_err = smp.utilities.lambdify(self.variables[var].n, preset_err_sympy)
         for var_val in var_values:
-            val = Val(fast_val(var_val), str(fast_err(var_val)))#self.at([[var, var_val], ["\\sigma_" + var, 0]], as_val=True)
+            val = Val(fast_val(var_val), str(fast_err(var_val)))
             if val.e == 0:
                 val.e = dc.Decimal("NaN")
             data[val_label].append(val)
@@ -584,8 +592,16 @@ class Dataset:  # Object representing a full Dataset
             for c_index in c_indices:
                 self.set(r_index, c_index, method(self.at(r_index, c_index), r_index, c_index))
 
-    def print(self):
+    def print(self, extended=False):
+        if extended:
+            max_rows = pd.get_option('display.max_rows')
+            max_cols = pd.get_option('display.max_columns')
+            pd.set_option('display.max_rows', None)
+            pd.set_option('display.max_columns', None)
         print(self.frame)
+        if extended:
+            pd.set_option('display.max_rows', max_rows)
+            pd.set_option('display.max_columns', max_cols)
 
     def delete(self, c_indices=None, r_indices=None):
         if c_indices is None:
@@ -702,7 +718,10 @@ class Dataset:  # Object representing a full Dataset
         for i in index_of(c_names):
             data[c_names[i]] = []
             for j in index_of(lists[i]):
-                data[c_names[i]].append(Val.to_val(lists[i][j]))
+                try:
+                    data[c_names[i]].append(Val.to_val(lists[i][j]))
+                except TypeError:
+                    data[c_names[i]].append(lists[i][j])
 
         self.frame = pd.DataFrame(data, r_names)
 
@@ -816,6 +835,7 @@ class Legend:
 
 
 class Plot:
+
 
     @staticmethod
     def _color(index):
@@ -1155,6 +1175,9 @@ class Fit:
         self.estimated_parameters = estimated_parameters
         self.bounds = bounds
         self.update()
+
+
+    #TODO make fit results vals
 
 ###################################################################################################
 # Best motivateMe() texts:
