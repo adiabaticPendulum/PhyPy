@@ -6,7 +6,7 @@ DEC_DGTS = 64  # How many decimal digits (without rounding errors) shall be used
 #################################################################################################
 # Init
 ESC_STYLES = {"Error": '\033[41m\033[30m', "Error_txt": '\033[0m\033[31m', "Warning": '\033[43m\033[30m',
-              "Warning_txt": '\033[0m\033[33m', "Default": '\033[0m', "Hacker_cliche": '\033[42m\033[30m'}
+              "Warning_txt": '\033[0m\033[33m', "Default": '\033[0m', "Hacker_cliche": "\033[38;2;0;255;0m ", "Green_BG": '\033[42m\033[30m'}
 
 # Note: Appart from this, you have to install 'Jinja2' (e.g. using pip)
 import asyncio
@@ -196,8 +196,9 @@ class Val:  # Todo: document!
         self.v = dc.Decimal(val)
         self.e = dc.Decimal(err)
         self._known_decimal_figures = 0 if "." not in str(val) else len(str(val).split('.')[1])
+        self._known_decimal_figures += 0 if "e" not in str(val) else (-int(str(val).split('e')[1]) - 1 - len(str(val).split('e')[1]))
         self._e_known_decimal_figures = 0 if "." not in str(err) else len(str(err).split('.')[1])
-
+        self._e_known_decimal_figures += 0 if "e" not in str(err) else (-int(str(err).split('e')[1]) - 1 - len(str(err).split('e')[1]))
     def __str__(self):
         return self.sig_round(warn_for_bad_error=False)[0]
         # return str(self.v) if mt.isnan(self.e) or type(self.e) == str else self.sig_round()[0]
@@ -235,12 +236,18 @@ class Val:  # Todo: document!
 
     def set(self, val):
         self.v = val
+        self._known_decimal_figures = 0 if "." not in str(val) else len(str(val).split('.')[1])
+        self._known_decimal_figures += 0 if "e" not in str(val) else (
+                    -int(str(val).split('e')[1]) - 1 - len(str(val).split('e')[1]))
 
     def get_err(self):
         return cpy.deepcopy(self.e)
 
-    def set_err(self, val):
-        self.e = val
+    def set_err(self, new_err):
+        self.e = new_err
+        self._e_known_decimal_figures = 0 if "." not in str(new_err) else len(str(new_err).split('.')[1])
+        self._e_known_decimal_figures += 0 if "e" not in str(new_err) else (
+                    -int(str(new_err).split('e')[1]) - 1 - len(str(new_err).split('e')[1]))
 
     def sig_round(self, sig_digits=1, additional_digit=True, warn_for_bad_error=True):
         val = self.get()
@@ -274,7 +281,6 @@ class Val:  # Todo: document!
         dec_pot = -(
             -sig_pos + sig_digits - 1 if -sig_pos + sig_digits - 1 <= self._e_known_decimal_figures else self._e_known_decimal_figures)  # digits the point gets shifted by
         err *= dc.Decimal(10 ** -dec_pot)
-
         if additional_digit and err < 3:
             err *= dc.Decimal(10)
             dec_pot -= 1
@@ -504,10 +510,10 @@ class Formula(MatEx):
 
 
 class Dataset:  # Object representing a full Dataset
-    frame = pd.DataFrame()
 
     def __init__(self, x_label=None, y_label=None, dictionary=None, lists=None, csv_path=None, r_names=None,
                  c_names=None, val_err_index_pairs=None, title=None):
+        self.frame = pd.DataFrame()
         self.title = title
         self.plot_color = None
         if val_err_index_pairs is None:
@@ -530,6 +536,18 @@ class Dataset:  # Object representing a full Dataset
         except:
             res = self.frame.iloc[index]
         return res
+
+    def rename_rows(self, indices, new_names):
+        name_dict = {}
+        for i in index_of(indices):
+            name_dict[self.get_row_names()[indices[i]]] = new_names[i]
+        self.frame.rename(mapper=name_dict, inplace=True, axis="rows")
+
+    def rename_cols(self, indices, new_names):
+        name_dict = {}
+        for i in index_of(indices):
+            name_dict[self.get_col_names()[indices[i]]] = new_names[i]
+        self.frame.rename(mapper=name_dict, inplace=True, axis="columns")
 
     def add_column(self, content, name, index=None):
         if index is None:
@@ -596,12 +614,15 @@ class Dataset:  # Object representing a full Dataset
         if extended:
             max_rows = pd.get_option('display.max_rows')
             max_cols = pd.get_option('display.max_columns')
+            max_col_width = pd.get_option('display.max_colwidth')
             pd.set_option('display.max_rows', None)
             pd.set_option('display.max_columns', None)
+            pd.set_option('display.max_colwidth', None)
         print(self.frame)
         if extended:
             pd.set_option('display.max_rows', max_rows)
             pd.set_option('display.max_columns', max_cols)
+            pd.set_option('display.max_colwidth', max_col_width)
 
     def delete(self, c_indices=None, r_indices=None):
         if c_indices is None:
@@ -772,7 +793,10 @@ class Dataset:  # Object representing a full Dataset
         self.frame.to_csv(path, sep=delimiter, index_label=self.x_label, columns=columns, index=show_index)
 
     def to_latex(self, show_index=False):
-        styler = sty.Styler(self.frame)
+
+        ds = cpy.deepcopy(self)
+        ds.apply(lambda cell, row, col: "$" + str(cell) + "$")
+        styler = sty.Styler(ds.frame)
         if not show_index:
             styler.hide(axis="index")
 
@@ -835,7 +859,6 @@ class Legend:
 
 
 class Plot:
-
 
     @staticmethod
     def _color(index):
@@ -1015,8 +1038,6 @@ class Covariance_Matrix:
 
 
 class Fit:
-    # TODO: TEST!
-
     @property
     def dataset(self):
         return self._dataset
@@ -1134,6 +1155,7 @@ class Fit:
         if self.is_linear:
             self.result["m"], self.result["b"], self.result["chi_squared"] = Fit.fit_linear(
                 self.dataset.col(self.x_index), self.dataset.col(self.y_index))
+            self.result["reduced_chi_squared"]  = self.result["chi_squared"]/(len(self.dataset.col(self.x_index)) - 2)
         else:
             params, chi_squared, cov_mat = self.fit_chi_squared(self.dataset.col(self.x_index),
                                                                 self.dataset.col(self.y_index), self.fit_formula,
@@ -1143,16 +1165,18 @@ class Fit:
                 self.result[self.fit_variables[i].str] = Val(params[i], np.sqrt(np.diag(cov_mat))[i])
 
             self.result["chi_squared"] = chi_squared
-            self.result["chi_squared_over_n_minus_p"] = chi_squared / (
+            self.result["reduced_chi_squared"] = chi_squared / (
                         len(self.dataset.col(self.x_index)) - len(self.fit_variables))
             self.result["covariance_matrix"] = cov_mat
 
     def formula(self):
         if self.is_linear:
-            x_name = "x" if type(self._dataset.get_col_names()[self.x_index]) is int else self._dataset.get_col_names()[
-                self.x_index]
-            return Formula([x_name], latex=self.result["m"].sig_round()[1] + " * " + x_name + " + " +
-                                           self.result["b"].sig_round()[1])
+            if self.x_variable is None:
+                x_name = "x" if type(self._dataset.get_col_names()[self.x_index]) is int else self._dataset.get_col_names()[
+                    self.x_index]
+            x_var = self.x_variable if self.x_variable is not None else Var(x_name)
+            return Formula([x_var], sympy=self.result["m"].v * x_var.n +
+                                           self.result["b"].v)
         else:
             var_val_pairs = [[self.fit_variables[i], self.result[self.fit_variables[i].str]]
                              for i in index_of(self.fit_variables)]
@@ -1176,8 +1200,6 @@ class Fit:
         self.bounds = bounds
         self.update()
 
-
-    #TODO make fit results vals
 
 ###################################################################################################
 # Best motivateMe() texts:

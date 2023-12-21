@@ -1,4 +1,4 @@
-# PhysicsLab 0.11 (Beta)
+# PhysicsLab 0.12 (Beta)
 A library based on Pandas, Numpy and Matplotlib to facilitated Physics Labs at the University and evaluation of experimental results in general.
 
 **NOTE**: Be aware that most of this is not that advanced. In fact, most of it are just some handy presets, shortcuts and small modifications, mostly designed to suit my personal needs and preferences.
