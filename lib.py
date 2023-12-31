@@ -170,6 +170,26 @@ class Euler_Solver:
 
 class Val:  # Todo: document!
 
+    @property
+    def v(self):
+        return self._v
+    @v.setter
+    def v(self, new_v):
+        self._v = dc.Decimal(new_v)
+        self._known_decimal_figures = 0 if "." not in str(new_v) else len(str(new_v).split('.')[1])
+        self._known_decimal_figures += 0 if "e" not in str(new_v) else (-int(str(new_v).split('e')[1]) - 1 - len(str(new_v).split('e')[1]))
+
+    @property
+    def e(self):
+        return self._e
+
+    @e.setter
+    def e(self, new_e):
+        self._e = dc.Decimal(new_e)
+        self._e_known_decimal_figures = 0 if "." not in str(new_e) else len(str(new_e).split('.')[1])
+        self._e_known_decimal_figures += 0 if "e" not in str(new_e) else (
+                    -int(str(new_e).split('e')[1]) - 1 - len(str(new_e).split('e')[1]))
+
     @staticmethod
     def to_val(val, modify=lambda val: val):
         if type(val) is Val:
