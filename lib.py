@@ -24,8 +24,9 @@ import pandas.io.formats.style as sty
 import latex2sympy2 as l2s2
 import sympy as smp
 import scipy as sp
+import sys
 
-libs = [asyncio, cls, mt, pt, plt, np, pd, dc, cpy, l2s2, tck, smp, sp]
+libs = [asyncio, cls, mt, pt, plt, np, pd, dc, cpy, l2s2, tck, smp, sp, sys]
 
 if DEC_DGTS <= dc.MAX_PREC:
     dc.getcontext().prec = DEC_DGTS
@@ -114,58 +115,111 @@ def invert_list(list):
 #####################################################################
 # Datasets and Data-Handling
 
-class Euler_Solver:
+class Solvers:
+    class Euler:
 
-    def evaluate(self, resolution, stop=None, variable_values=None):
-        res = [[self.initial_condition[i]] for i in index_of(self.initial_condition)]
+        def evaluate(self, resolution, stop=None, variable_values=None):
+            res = [[self.initial_condition[i]] for i in index_of(self.initial_condition)]
 
-        client_wants_ds = type(variable_values) is list
-        if variable_values is not None:
-            stop = variable_values[-1]
-            if not client_wants_ds:
-                variable_values = [variable_values]
-        else:
-            variable_values = []
+            client_wants_ds = type(variable_values) is list
+            if variable_values is not None:
+                stop = variable_values[-1]
+                if not client_wants_ds:
+                    variable_values = [variable_values]
+            else:
+                variable_values = []
 
-        variable_values.sort()
-        client_values = [[]] + [[] for var in self.result_variables]
-        client_values_i = 0
-        i = 1
-        while True:
-            args = {self.variable.n: res[0][i - 1]}
-            for k in index_of(self.result_variables):
-                args[self.result_variables[k].n] = res[1 + k][i - 1]
-            if len(variable_values) > client_values_i and variable_values[client_values_i] <= res[0][
-                i - 1] + resolution:
-                client_values[0].append(variable_values[client_values_i])
+            variable_values.sort()
+            client_values = [[]] + [[] for var in self.result_variables]
+            client_values_i = 0
+            i = 1
+            while True:
+                args = {self.variable.n: res[0][i - 1]}
+                for k in index_of(self.result_variables):
+                    args[self.result_variables[k].n] = res[1 + k][i - 1]
+                if len(variable_values) > client_values_i and variable_values[client_values_i] <= res[0][
+                    i - 1] + resolution:
+                    client_values[0].append(variable_values[client_values_i])
+                    for j in index_of(self.result_variables):
+                        client_values[1 + j].append(
+                            res[1 + j][i - 1] + (variable_values[client_values_i] - res[0][i - 1]) *
+                            self.differential_equations[j].sympy.xreplace(args))
+
+                    client_values_i += 1
+                res[0].append(res[0][i - 1] + resolution)
                 for j in index_of(self.result_variables):
-                    client_values[1+j].append(res[1+j][i - 1] + (variable_values[client_values_i] - res[0][i - 1]) * self.differential_equations[j].sympy.xreplace(args))
+                    res[1 + j].append(
+                        res[1 + j][i - 1] + resolution * self.differential_equations[j].sympy.xreplace(args))
 
-                client_values_i += 1
-            res[0].append(res[0][i - 1] + resolution)
-            for j in index_of(self.result_variables):
-                res[1+j].append(res[1+j][i - 1] + resolution * self.differential_equations[j].sympy.xreplace(args))
+                if res[0][i] >= stop:
+                    break
+                i += 1
 
-            if res[0][i] >= stop:
-                break
-            i += 1
+            if client_wants_ds:
+                return Dataset(c_names=[self.variable.str] + [var.str for var in self.result_variables],
+                               lists=client_values)
+
+            if len(client_values) == 1:
+                return variable_values[0]
+
+            return Dataset(c_names=[self.variable.str] + [var.str for var in self.result_variables], lists=res)
+
+        def __init__(self, result_variables, variable, differential_equations, initial_condition):
+            # tuple initial_condition, MatEx diferential_equation
+            self.differential_equations = differential_equations
+            self.initial_condition = initial_condition
+            self.variable = variable
+            self.result_variables = result_variables
+
+    class Root:
+        def __init__(self, expression, epsilon):
+            self.expression = MatEx(expression.variables.values(), sympy=expression.sympy) if type(expression) is Formula else expression
+            delkeys = []
+            for key in self.expression.variables.keys():
+                if "\\sigma_{" in key:
+                    delkeys.append(key)
+
+            for key in delkeys:
+                self.expression.variables.__delitem__(key)
+
+            self.epsilon = Val(epsilon)
+            self._old_recursion_limit = sys.getrecursionlimit()
 
 
-        if client_wants_ds:
-            return Dataset(c_names=[self.variable.str] + [var.str for var in self.result_variables],
-                           lists= client_values)
 
-        if len(client_values) == 1:
-            return variable_values[0]
+        def evaluate(self, initial_guesses):
+            if len(initial_guesses) >= self._old_recursion_limit:
+                sys.setrecursionlimit(self._old_recursion_limit + len(initial_guesses))
+                print(sys.getrecursionlimit())
+            fun = smp.lambdify([var.n for var in self.expression.variables.values()], self.expression.sympy)
+            initial_guess = initial_guesses[0]
+            initial_guesses.remove(initial_guess)
+            res = sp.optimize.root(fun, initial_guess)
 
-        return Dataset(c_names=[self.variable.str] + [var.str for var in self.result_variables], lists=res)
+            if len(initial_guesses) > 0:
+                ret_ds = self.evaluate(initial_guesses)
+            else:
+                ret_dict = {}
+                for key in self.expression.variables.keys():
+                    ret_dict[key] = []
+                ret_ds = Dataset(dictionary=ret_dict)
 
-    def __init__(self, result_variables, variable, differential_equations, initial_condition):
-        # tuple initial_condition, MatEx diferential_equation
-        self.differential_equations = differential_equations
-        self.initial_condition = initial_condition
-        self.variable = variable
-        self.result_variables = result_variables
+            if not res.success:
+                return ret_ds
+
+            for r in index_of(ret_ds.col(0)):
+                for c in index_of(ret_ds.row(r)):
+                    if not ((ret_ds.at(r, c) - self.epsilon).v <= res.x[c] <= (ret_ds.at(r, c) + self.epsilon).v):
+                        break
+                    if c == len((ret_ds.row(r))) - 1:
+                        # res already in ret_dict
+                        return ret_ds
+
+            ret_ds.add_row([Val(component) for component in res.x])
+            return ret_ds
+
+        def __del__(self):
+            sys.setrecursionlimit(self._old_recursion_limit)
 
 
 class Val:  # Todo: document!
@@ -443,7 +497,10 @@ class Formula(MatEx):
             frml.sympy = frml.sympy.subs(atom, smp.N(atom, 1))
 
         frml.sympy = smp.sympify(frml.sympy)
-        frml.sympy = smp.simplify(frml.sympy)
+        try:
+            frml.sympy = smp.simplify(frml.sympy)
+        except:
+            pass
         return "$" + frml._latex + "$"
 
     @latex.setter
@@ -489,6 +546,15 @@ class Formula(MatEx):
             val.e = dc.Decimal("NaN")
             self.preset_variables[var_val_pair[0].str] = val.v
             self.preset_variables["\\sigma_{" + var_val_pair[0].str + "}"] = var_val_pair[1].e
+
+    def substitute_variables(self, var_formula_pairs):
+        for pair in var_formula_pairs:
+            self.sympy = self.sympy.subs(pair[0].n, pair[1].sympy)
+            self.error.sympy = self.error.sympy.subs(self.error.variables["\\sigma_{" + pair[0].str + "}"].n, pair[1].error.sympy)
+            for dict_entry in pair[1].variables.items():
+                self.variables[dict_entry[0]] = dict_entry[1]
+            for dict_entry in pair[1].error.variables.items():
+                self.error.variables[dict_entry[0]] = dict_entry[1]
 
     def to_val(self, var_val_pairs):
         at = self.at(var_val_pairs, as_val=False)
@@ -566,7 +632,9 @@ class Dataset:  # Object representing a full Dataset
     def rename_cols(self, indices, new_names):
         name_dict = {}
         for i in index_of(indices):
-            name_dict[self.get_col_names()[indices[i]]] = new_names[i]
+            #name_dict[self.get_col_names()[indices[i]]] = new_names[i]
+            name_dict[indices[i] if type(indices[i]) is str else self.get_col_names()[indices[i]]] = new_names[i]
+
         self.frame.rename(mapper=name_dict, inplace=True, axis="columns")
 
     def add_column(self, content, name, index=None):
@@ -576,13 +644,14 @@ class Dataset:  # Object representing a full Dataset
 
     def add_row(self, content):
         self.frame = pd.concat([self.frame, Dataset(lists=[[c] for c in content], c_names=self.get_col_names()).frame],
-                               axis="index")
+                               axis="index", ignore_index=True)
+
 
     def col(self, index):
         try:
             res = self.frame[index]
         except:
-            res = self.frame[self.get_names([0, index])[1]]
+            res = self.frame[self.get_col_names()[index]]
         return list(res)
 
     def at(self, r_index, c_index):
@@ -877,16 +946,34 @@ class Legend:
         else:
             self.location = "upper right"
 
+class Visualizers:
+    class Dotted_line:
+        def __init__(self, dataset, color="black", index_pair=None, linestyle="dashed"):
+            if index_pair is None:
+                index_pair = [0, 1]
+            self.dataset = dataset
+            self.color = color
+            self.index_pair = index_pair
+            self.linestyle = linestyle
+
+    class Text:
+        def __init__(self, content, position, fontsize=None, color="black", alignment="center"):
+            self.alignment = alignment
+            self.content = content
+            self.position = position
+            self.fontsize = fontsize if fontsize is not None else plt.rcParams['font.size']
+            self.color = color
+
 
 class Plot:
 
     @staticmethod
-    def _color(index):
+    def generate_color(index):
         golden_ratio = (1 + mt.sqrt(5)) / 2
         if index == 0:
             return [cls.hsv_to_rgb(1 / 3, 1, 1)[i] for i in range(3)]
 
-        last_color = cls.rgb_to_hsv(Plot._color(index - 1)[0], Plot._color(index - 1)[1], Plot._color(index - 1)[2])
+        last_color = cls.rgb_to_hsv(Plot.generate_color(index - 1)[0], Plot.generate_color(index - 1)[1], Plot.generate_color(index - 1)[2])
         h = last_color[0] + 1 / 3
         v = last_color[2]
         s = last_color[1]
@@ -908,6 +995,13 @@ class Plot:
         if type(self.sigma_interval) not in [tuple, list]:
             self.sigma_interval = (self.sigma_interval, self.sigma_interval)
 
+        for i in index_of(self.curve_datasets):
+            dataset = self.curve_datasets[i]
+            if dataset is None:
+                continue
+            plt.plot([val.v for val in list(dataset.col(self.curve_column_index_pairs[i][0]))], [val.v for val in list(dataset.col(self.curve_column_index_pairs[i][1]))],
+                     color=Plot.generate_color(i) if dataset.plot_color is None else dataset.plot_color)
+
         for i in index_of(self.point_datasets):
             dataset = self.point_datasets[i]
             if dataset is None:
@@ -915,21 +1009,20 @@ class Plot:
             err_ds = dataset.clone()
             err_ds.filter(1, lambda val: mt.isnan(val.e) or val.e is None)
             if len(err_ds.frame.columns) > 0:
-                plt.errorbar(x=[val.v for val in list(err_ds.col(0))], y=[val.v for val in list(err_ds.col(1))],
-                             yerr=[self.sigma_interval[1] * val.e for val in list(err_ds.col(1))],
-                             xerr=[self.sigma_interval[0] * val.e for val in list(err_ds.col(0))],
-                             fmt='None', ecolor=self._color(i))
+                plt.errorbar(x=[val.v for val in list(err_ds.col(self.point_column_index_pairs[i][0]))], y=[val.v for val in list(err_ds.col(self.point_column_index_pairs[i][1]))],
+                             yerr=[self.sigma_interval[1] * val.e for val in list(err_ds.col(self.point_column_index_pairs[i][1]))],
+                             xerr=[self.sigma_interval[0] * val.e for val in list(err_ds.col(self.point_column_index_pairs[i][0]))],
+                             fmt='None', ecolor=self.generate_color(i))
 
             if len(dataset.frame.columns) > 0:
-                plt.scatter([val.v for val in list(dataset.col(0))], [val.v for val in list(dataset.col(1))],
-                            marker="x", color=Plot._color(i) if dataset.plot_color is None else dataset.plot_color)
+                plt.scatter([val.v for val in list(dataset.col(self.point_column_index_pairs[i][0]))], [val.v for val in list(dataset.col(self.point_column_index_pairs[i][1]))],
+                            marker="x", color=Plot.generate_color(i) if dataset.plot_color is None else dataset.plot_color)
 
-        for i in index_of(self.curve_datasets):
-            dataset = self.curve_datasets[i]
-            if dataset is None:
-                continue
-            plt.plot([val.v for val in list(dataset.col(0))], [val.v for val in list(dataset.col(1))],
-                     color=Plot._color(i) if dataset.plot_color is None else dataset.plot_color)
+        for vis in self.visualizers:
+            if type(vis) is Visualizers.Dotted_line:
+                plt.plot([val.v for val in vis.dataset.col(vis.index_pair[0])], [val.v for val in vis.dataset.col(vis.index_pair[1])], color = vis.color, linestyle=vis.linestyle)
+            if type(vis) is Visualizers.Text:
+                self.axes.text(vis.position[0], vis.position[1], vis.content, fontsize=vis.fontsize, horizontalalignment=vis.alignment)
 
         plt.title(self.title, fontsize=40)
 
@@ -961,22 +1054,29 @@ class Plot:
         else:
             plt.savefig(fname=path, dpi=dpi)
 
-    def add_points(self, new_point_dataset):
+    def add_points(self, new_point_dataset, new_column_index_pair=None):
         self.point_datasets.append(new_point_dataset)
+        self.point_column_index_pairs.append((0, 1) if new_column_index_pair is None else (new_column_index_pair[0] if new_column_index_pair[0] is not None else 0, new_column_index_pair[1] if new_column_index_pair[1] is not None else 1))
         self.update_plt()
 
-    def add_curve(self, curve_dataset):
+    def add_curve(self, curve_dataset, new_column_index_pair):
         self.curve_datasets.append(curve_dataset)
+        self.curve_column_index_pairs.append((0, 1) if new_column_index_pair is None else (new_column_index_pair[0] if new_column_index_pair[0] is not None else 0, new_column_index_pair[1] if new_column_index_pair[1] is not None else 1))
         self.update_plt()
 
+    def add_visualizers(self, new_visualizers):
+        if type(new_visualizers) is not list:
+            self.visualizers.append(new_visualizers)
+        else:
+            self.visualizers += new_visualizers
     def update_legend(self):
         entries = [{"name": self.point_datasets[i].title,
-                                       "color": Plot._color(i) if self.point_datasets[i].plot_color is None else self.point_datasets[i].plot_color} for i in index_of(self.point_datasets)]
+                                       "color": Plot.generate_color(i) if self.point_datasets[i].plot_color is None else self.point_datasets[i].plot_color} for i in index_of(self.point_datasets)]
         entries += [{"name": self.curve_datasets[i].title,
-                                       "color": Plot._color(i) if self.curve_datasets[i].plot_color is None else self.curve_datasets[i].plot_color} for i in index_of(self.curve_datasets)]
+                                       "color": Plot.generate_color(i) if self.curve_datasets[i].plot_color is None else self.curve_datasets[i].plot_color} for i in index_of(self.curve_datasets)]
         self.legend = Legend(entries=entries)
 
-    def __init__(self, point_datasets=None, curve_datasets=None, title="Title", x_label=None, y_label=None):
+    def __init__(self, point_datasets=None, curve_datasets=None, point_column_index_pairs=None, curve_column_index_pairs=None, title="Title", x_label=None, y_label=None):
         if curve_datasets is None:
             curve_datasets = []
         if point_datasets is None:
@@ -999,12 +1099,21 @@ class Plot:
         self.legend = Legend()
         self.bounds = {"x": [None, None],
                   "y": [None, None]}
+        self.visualizers = []
+
+        self.point_column_index_pairs = [[(0 if point_column_index_pairs is None or point_column_index_pairs[pcipi] is None or point_column_index_pairs[pcipi][0] is None else point_column_index_pairs[pcipi][0]), 1 if point_column_index_pairs is None or point_column_index_pairs[pcipi] is None or point_column_index_pairs[pcipi][1] is None else point_column_index_pairs[pcipi][1]] for pcipi in index_of(point_datasets)]
+        self.curve_column_index_pairs = [[(0 if curve_column_index_pairs is None or curve_column_index_pairs[ccipi] is None or curve_column_index_pairs[ccipi][0] is None else curve_column_index_pairs[ccipi][0]), 1 if curve_column_index_pairs is None or curve_column_index_pairs[ccipi] is None or curve_column_index_pairs[ccipi][1] is None else curve_column_index_pairs[ccipi][1]] for ccipi in index_of(curve_datasets)]
+
+        for i in index_of(self.point_column_index_pairs):
+            for j in index_of(self.point_column_index_pairs[i]):
+                if type(self.point_column_index_pairs[i][j]) is str:
+                    self.point_column_index_pairs[i][j] = self.point_datasets[i].get_col_names().index(self.point_column_index_pairs[i][j])
 
         self.update_legend()
 
         # TODO:CHECK ALL LABELS
-        self.x_label = x_label if x_label is not None else self.point_datasets[0].get_col_names()[0]
-        self.y_label = y_label if y_label is not None else self.point_datasets[0].get_col_names()[1]
+        self.x_label = x_label if x_label is not None else (self.point_datasets[0].get_col_names()[self.point_column_index_pairs[0][0]] if len(self.point_datasets) > 0 else self.curve_datasets[0].get_col_names()[self.curve_column_index_pairs[0][0]])
+        self.y_label = y_label if y_label is not None else (self.point_datasets[0].get_col_names()[self.point_column_index_pairs[0][1]] if len(self.point_datasets) > 0 else self.curve_datasets[0].get_col_names()[self.curve_column_index_pairs[0][1]])
         for point_dataset in point_datasets:
             point_dataset.x_label = self.x_label
             point_dataset.y_label = self.y_label
