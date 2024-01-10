@@ -101,7 +101,7 @@ def motivate_me():  # Use GPT-2 to generate and show a motivational text to conv
 ######################################################################
 # Misc
 def index_of(arr, start=0):
-    return range(start, len(arr))
+    return list(range(start, len(arr)))
 
 
 def invert_list(list):
@@ -190,7 +190,6 @@ class Solvers:
         def evaluate(self, initial_guesses):
             if len(initial_guesses) >= self._old_recursion_limit:
                 sys.setrecursionlimit(self._old_recursion_limit + len(initial_guesses))
-                print(sys.getrecursionlimit())
             fun = smp.lambdify([var.n for var in self.expression.variables.values()], self.expression.sympy)
             initial_guess = initial_guesses[0]
             initial_guesses.remove(initial_guess)
@@ -346,6 +345,8 @@ class Val:  # Todo: document!
                    "Can only sig_round Vals with well-defined values and error, but got " + str(val) + ", " + str(err))
             return
 
+        if val.is_nan():
+            return ["NaN"]
         sig_pos = mt.floor(mt.log10(
             err))  # position of the first significant figure relative to the decimal point (Number of digits between first significant digit and point, can be negative (behind point), 0 is in front of point)
 
@@ -686,7 +687,7 @@ class Dataset:  # Object representing a full Dataset
 
     def apply(self, method, r_indices=None, c_indices=None):
         if r_indices is None:
-            r_indices = self.get_row_names()
+            r_indices = index_of(self.get_row_names())
         if c_indices is None:
             c_indices = self.get_col_names()
 
@@ -867,8 +868,10 @@ class Dataset:  # Object representing a full Dataset
         self.apply(lambda obj, r_index, c_index: Val.to_val(obj))
 
     def filter(self, c_index, filter_method):
-        if c_index <= len(self.col(c_index)):
-            return
+        if type(c_index) is str:
+            c_index = self.get_col_names().index(c_index)
+        #if c_index <= len(self.col(c_index)):
+            #return
         col = list(self.col(c_index))
         for i in index_of(col):
             if filter_method(col[i]):
@@ -987,6 +990,22 @@ class Plot:
 
         return [cls.hsv_to_rgb(h, s, v)[i] for i in range(3)]
 
+    @property
+    def point_colors(self):
+        return self._point_colors
+
+    @point_colors.setter
+    def point_colors(self, new_colors):
+        self._point_colors = new_colors
+
+    @property
+    def curve_colors(self):
+        return self._curve_colors
+
+    @curve_colors.setter
+    def curve_colors(self, new_colors):
+        self._curve_colors = new_colors
+
     def update_plt(self):
         plt.figure(self.fig)
         plt.xticks(fontsize=20)
@@ -1000,7 +1019,13 @@ class Plot:
             if dataset is None:
                 continue
             plt.plot([val.v for val in list(dataset.col(self.curve_column_index_pairs[i][0]))], [val.v for val in list(dataset.col(self.curve_column_index_pairs[i][1]))],
-                     color=Plot.generate_color(i) if dataset.plot_color is None else dataset.plot_color)
+                     color=Plot.generate_color(i) if self.curve_colors[i] is None and dataset.plot_color is None else (self.curve_colors[i] if self.curve_colors[i] is not None else dataset.plot_color))
+
+        for vis in self.visualizers:
+            if type(vis) is Visualizers.Dotted_line:
+                plt.plot([val.v for val in vis.dataset.col(vis.index_pair[0])], [val.v for val in vis.dataset.col(vis.index_pair[1])], color = vis.color, linestyle=vis.linestyle)
+            if type(vis) is Visualizers.Text:
+                self.axes.text(vis.position[0], vis.position[1], vis.content, fontsize=vis.fontsize, horizontalalignment=vis.alignment)
 
         for i in index_of(self.point_datasets):
             dataset = self.point_datasets[i]
@@ -1012,17 +1037,14 @@ class Plot:
                 plt.errorbar(x=[val.v for val in list(err_ds.col(self.point_column_index_pairs[i][0]))], y=[val.v for val in list(err_ds.col(self.point_column_index_pairs[i][1]))],
                              yerr=[self.sigma_interval[1] * val.e for val in list(err_ds.col(self.point_column_index_pairs[i][1]))],
                              xerr=[self.sigma_interval[0] * val.e for val in list(err_ds.col(self.point_column_index_pairs[i][0]))],
-                             fmt='None', ecolor=self.generate_color(i))
+                             fmt='None', ecolor=Plot.generate_color(i) if self.point_colors[i] is None and dataset.plot_color is None else (self.point_colors[i] if self.point_colors[i] is not None else dataset.plot_color))
 
             if len(dataset.frame.columns) > 0:
                 plt.scatter([val.v for val in list(dataset.col(self.point_column_index_pairs[i][0]))], [val.v for val in list(dataset.col(self.point_column_index_pairs[i][1]))],
-                            marker="x", color=Plot.generate_color(i) if dataset.plot_color is None else dataset.plot_color)
+                            marker="x", color=Plot.generate_color(i) if self.point_colors[i] is None and dataset.plot_color is None else (self.point_colors[i] if self.point_colors[i] is not None else dataset.plot_color))
 
-        for vis in self.visualizers:
-            if type(vis) is Visualizers.Dotted_line:
-                plt.plot([val.v for val in vis.dataset.col(vis.index_pair[0])], [val.v for val in vis.dataset.col(vis.index_pair[1])], color = vis.color, linestyle=vis.linestyle)
-            if type(vis) is Visualizers.Text:
-                self.axes.text(vis.position[0], vis.position[1], vis.content, fontsize=vis.fontsize, horizontalalignment=vis.alignment)
+
+
 
         plt.title(self.title, fontsize=40)
 
@@ -1054,14 +1076,16 @@ class Plot:
         else:
             plt.savefig(fname=path, dpi=dpi)
 
-    def add_points(self, new_point_dataset, new_column_index_pair=None):
+    def add_points(self, new_point_dataset, new_column_index_pair=None, color=None):
         self.point_datasets.append(new_point_dataset)
         self.point_column_index_pairs.append((0, 1) if new_column_index_pair is None else (new_column_index_pair[0] if new_column_index_pair[0] is not None else 0, new_column_index_pair[1] if new_column_index_pair[1] is not None else 1))
+        self.point_colors.append(color)
         self.update_plt()
 
-    def add_curve(self, curve_dataset, new_column_index_pair):
+    def add_curve(self, curve_dataset, new_column_index_pair=None, color=None):
         self.curve_datasets.append(curve_dataset)
         self.curve_column_index_pairs.append((0, 1) if new_column_index_pair is None else (new_column_index_pair[0] if new_column_index_pair[0] is not None else 0, new_column_index_pair[1] if new_column_index_pair[1] is not None else 1))
+        self.point_colors.append(color)
         self.update_plt()
 
     def add_visualizers(self, new_visualizers):
@@ -1104,6 +1128,8 @@ class Plot:
         self.point_column_index_pairs = [[(0 if point_column_index_pairs is None or point_column_index_pairs[pcipi] is None or point_column_index_pairs[pcipi][0] is None else point_column_index_pairs[pcipi][0]), 1 if point_column_index_pairs is None or point_column_index_pairs[pcipi] is None or point_column_index_pairs[pcipi][1] is None else point_column_index_pairs[pcipi][1]] for pcipi in index_of(point_datasets)]
         self.curve_column_index_pairs = [[(0 if curve_column_index_pairs is None or curve_column_index_pairs[ccipi] is None or curve_column_index_pairs[ccipi][0] is None else curve_column_index_pairs[ccipi][0]), 1 if curve_column_index_pairs is None or curve_column_index_pairs[ccipi] is None or curve_column_index_pairs[ccipi][1] is None else curve_column_index_pairs[ccipi][1]] for ccipi in index_of(curve_datasets)]
 
+        self.point_colors = [None for pds in self.point_datasets]
+        self.curve_colors = [None for cds in self.curve_datasets]
         for i in index_of(self.point_column_index_pairs):
             for j in index_of(self.point_column_index_pairs[i]):
                 if type(self.point_column_index_pairs[i][j]) is str:
