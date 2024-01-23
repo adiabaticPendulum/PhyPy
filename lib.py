@@ -14,6 +14,7 @@ import colorsys as cls
 import math as mt
 import decimal as dc
 import copy as cpy
+import random as rndm
 import pyppeteer as pt
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tck
@@ -26,7 +27,7 @@ import sympy as smp
 import scipy as sp
 import sys
 
-libs = [asyncio, cls, mt, pt, plt, np, pd, dc, cpy, l2s2, tck, smp, sp, sys]
+libs = [asyncio, cls, mt, pt, plt, np, pd, dc, cpy, l2s2, tck, smp, sp, sys, rndm]
 
 if DEC_DGTS <= dc.MAX_PREC:
     dc.getcontext().prec = DEC_DGTS
@@ -111,6 +112,17 @@ def invert_list(list):
 
     return res
 
+def optimal_indices(arr, target):
+    res = []
+    epsilon = abs(target-arr[0])
+    for i in index_of(arr):
+        if abs(target-arr[i]) <= epsilon:
+            epsilon = abs(target-arr[i])
+    for i in index_of(arr):
+        if abs(target-arr[i]) <= epsilon:
+            res.append(i)
+
+    return res
 
 #####################################################################
 # Datasets and Data-Handling
@@ -385,7 +397,15 @@ class Val:  # Todo: document!
                 percent = mt.ceil(percent)
                 percent = str(percent) + " \cdot 10^{" + str(perc_pot) + "}"
 
-        return [str_val + " \pm " + str_err + " \: (\pm " + percent + "\%)", str_val, str_err, percent]
+        return [str_val + " \\pm " + str_err + " \: (\\pm " + percent + "\\%)", str_val, str_err, percent]
+
+    def sigma_interval(self, true_value):
+        if type(true_value) is Val:
+            true_value = true_value.v
+        if type(true_value) is not dc.Decimal:
+            true_value = dc.Decimal(true_value)
+
+        return abs(true_value - self.v)/self.e
 
 
 class Var:
@@ -525,7 +545,7 @@ class Formula(MatEx):
         for atom in ret_err.atoms(smp.Float):
             ret_err = ret_err.subs(atom, smp.N(atom, 1))
 
-        return self.latex[1:-1] + " \pm " + smp.latex(ret_err)
+        return self.latex[1:-1] + " \\pm " + smp.latex(ret_err)
 
     def at(self, var_val_pairs, as_val=True):
         for variable in self.preset_variables.keys():
@@ -960,12 +980,13 @@ class Visualizers:
             self.linestyle = linestyle
 
     class Text:
-        def __init__(self, content, position, fontsize=None, color="black", alignment="center"):
+        def __init__(self, content, position, fontsize=None, color="black", alignment="center", background_color=None):
             self.alignment = alignment
             self.content = content
             self.position = position
             self.fontsize = fontsize if fontsize is not None else plt.rcParams['font.size']
             self.color = color
+            self.background_color = background_color if background_color is not None else [0, 0, 0, 0]
 
 
 class Plot:
@@ -1025,7 +1046,7 @@ class Plot:
             if type(vis) is Visualizers.Dotted_line:
                 plt.plot([val.v for val in vis.dataset.col(vis.index_pair[0])], [val.v for val in vis.dataset.col(vis.index_pair[1])], color = vis.color, linestyle=vis.linestyle)
             if type(vis) is Visualizers.Text:
-                self.axes.text(vis.position[0], vis.position[1], vis.content, fontsize=vis.fontsize, horizontalalignment=vis.alignment)
+                self.axes.text(vis.position[0], vis.position[1], vis.content, fontsize=vis.fontsize, horizontalalignment=vis.alignment, backgroundcolor=vis.background_color)
 
         for i in index_of(self.point_datasets):
             dataset = self.point_datasets[i]
@@ -1042,9 +1063,6 @@ class Plot:
             if len(dataset.frame.columns) > 0:
                 plt.scatter([val.v for val in list(dataset.col(self.point_column_index_pairs[i][0]))], [val.v for val in list(dataset.col(self.point_column_index_pairs[i][1]))],
                             marker="x", color=Plot.generate_color(i) if self.point_colors[i] is None and dataset.plot_color is None else (self.point_colors[i] if self.point_colors[i] is not None else dataset.plot_color))
-
-
-
 
         plt.title(self.title, fontsize=40)
 
@@ -1272,8 +1290,9 @@ class Fit:
         else:
             Fit.fit_chi_squared(x, y, formula, new_a, precision, x_variable, fit_variables, covariance_matrix)
 
-    def fit_chi_squared(self, x, y, formula, estimated_parameters, x_variable, fit_variables, covariance_matrix, bounds):
-        covariance_matrix = covariance_matrix.at([y_val.e for y_val in y])
+    def fit_chi_squared(self, x, y, formula, estimated_parameters, x_variable, fit_variables, covariance_matrix, bounds, output_formula_only=False):
+        if covariance_matrix is not None:
+            covariance_matrix = covariance_matrix.at([y_val.e for y_val in y])
         vars = [x_variable.n]
 
         for variable in fit_variables:
@@ -1298,13 +1317,86 @@ class Fit:
 
         resulting_params, cov_mat, info_dict, mesg, ier = sp.optimize.curve_fit(
             smp.utilities.lambdify(vars, formula.sympy), [x_val.v for x_val in x], [y_val.v for y_val in y],
-            estimated_parameters, sigma=covariance_matrix, absolute_sigma=True, full_output=True, bounds=bounds, jac=jacobi)
+            estimated_parameters, sigma=covariance_matrix, absolute_sigma=True, full_output=True, bounds=bounds, jac=jacobi, maxfev=1600)
+
+        formula = cpy.deepcopy(formula)
+        formula.set_variables([[fit_variables[i], Val(resulting_params[i], np.sqrt(np.diag(cov_mat))[i])] for i in index_of(resulting_params)])
+
+        if output_formula_only:
+            return formula
+
         chi_squared = 0
-        for i in index_of(resulting_params):
-            chi_squared += info_dict["fvec"][i] ** 2
+        for i in index_of(y):
+            chi_squared += (y[i].v - formula.at([[x_variable, x[i]]]).v)**2/y[i].e**2
         for i in index_of(resulting_params):
             resulting_params[i] = Val(resulting_params[i], np.sqrt(np.diag(cov_mat))[i])
-        return resulting_params, chi_squared, cov_mat
+            return resulting_params, chi_squared, cov_mat
+
+    def k_fold(self, k, preset_folds=None):
+        if __debug_extended__:
+            print("\n\nPERFORMING K-FOLD TO FORMULA:")
+            print(self.formula.latex)
+        #preset folds is a dict {'x_lists': [_LIST_OF_LISTS_OF_X_VALS_], 'y_lists': [_LIST_OF_LISTS_OF_Y_VALS_]} where each list in 'x', 'y' represents the x or y values of a single fold
+        if preset_folds is not None:
+            x_lists = preset_folds["x_lists"]
+            y_lists = preset_folds["y_lists"]
+        else:
+            split_ds = self.dataset.clone()
+            x_lists = []
+            y_lists = []
+            n = len(split_ds.col(self.x_index))
+            for j in range(k-1):
+                x = []
+                y = []
+                for i in range(mt.floor(n/k)):
+                    chosen_index = rndm.randint(0, len(split_ds.col(self.x_index))-1)
+                    x.append(split_ds.col(self.x_index)[chosen_index])
+                    y.append(split_ds.col(self.y_index)[chosen_index])
+                    split_ds.delete(r_indices=[chosen_index])
+
+                x_lists.append(x)
+                y_lists.append(y)
+            #put rest of split_ds into last fold:
+            x_lists.append(split_ds.col(self.x_index))
+            y_lists.append(split_ds.col(self.y_index))
+
+        mses = []#mean squared errors
+        for i in range(k):
+            x = []
+            y = []
+            for j in [n for n in range(k) if n != i]:
+                x += x_lists[j]
+                y += y_lists[j]
+            if __debug_extended__:
+                print("STARTING", i, "-th FIT")
+            formula = self.fit_chi_squared(x, y, self.fit_formula, self.estimated_parameters, self.x_variable, self.fit_variables, None, self.bounds,True)
+            mse = 0
+            for j in index_of(y_lists[i]):
+                mse += (y_lists[i][j].v - formula.at([[self.x_variable, x_lists[i][j]]]).v) ** 2
+
+            if __debug_extended__:
+                print("GOT MSE", mse)
+            mses.append(mse / len(y_lists[i]))
+
+        CV = 0
+        for i in range(k):
+            CV += mses[i]
+
+        CV /= k
+
+        return {"CV": CV, "MSEs": mses, "folds": {'x_lists': x_lists, 'y_lists': y_lists}}
+    @staticmethod
+    def chi_squared(ds, formula, x_variable, x_index=0, y_index=1):
+        y = ds.col(y_index)
+        x = ds.col(x_index)
+        ret = 0
+        for i in index_of(ds.col(x_index)):
+            ret += (y[i].v - formula.at([[x_variable, x[i]]]).v) ** 2 / y[i].e ** 2
+        return ret
+
+    @staticmethod
+    def reduced_chi_squared(ds, formula, x_variable, number_of_fit_parameters, x_index=0, y_index=1):
+        return Fit.chi_squared(ds, formula, x_variable, x_index, y_index)/(len(ds.col(x_index)) - number_of_fit_parameters)
 
     def update(self):
         if self.is_linear:
@@ -1321,7 +1413,7 @@ class Fit:
 
             self.result["chi_squared"] = chi_squared
             self.result["reduced_chi_squared"] = chi_squared / (
-                        len(self.dataset.col(self.x_index)) - len(self.fit_variables))
+                    len(self.dataset.col(self.x_index)) - len(self.fit_variables))
             self.result["covariance_matrix"] = cov_mat
 
     def formula(self):
@@ -1331,7 +1423,7 @@ class Fit:
                     self.x_index]
             x_var = self.x_variable if self.x_variable is not None else Var(x_name)
             return Formula([x_var], sympy=self.result["m"].v * x_var.n +
-                                           self.result["b"].v)
+                                          self.result["b"].v)
         else:
             var_val_pairs = [[self.fit_variables[i], self.result[self.fit_variables[i].str]]
                              for i in index_of(self.fit_variables)]
