@@ -8,6 +8,8 @@ DEC_DGTS = 64  # How many decimal digits (without rounding errors) shall be used
 ESC_STYLES = {"Error": '\033[41m\033[30m', "Error_txt": '\033[0m\033[31m', "Warning": '\033[43m\033[30m',
               "Warning_txt": '\033[0m\033[33m', "Default": '\033[0m', "Hacker_cliche": "\033[38;2;0;255;0m ", "Green_BG": '\033[42m\033[30m'}
 
+PRINT_OPTIONS = {"relative_uncertanties": True}
+
 # Note: Appart from this, you have to install 'Jinja2' (e.g. using pip)
 import asyncio
 import colorsys as cls
@@ -58,6 +60,7 @@ plt.rcParams['errorbar.capsize'] = 5
 plt.rcParams['lines.markersize'] = 10
 
 
+
 ########################################################################################################
 # internal Functions
 
@@ -72,7 +75,6 @@ def _error(name, description):
             "Error_txt"] + description +
         ESC_STYLES["Default"] + ")\n\n\n")
     raise Exception(name + ": " + description)
-
 
 ########################################################################################################
 # Fun
@@ -94,16 +96,14 @@ async def motivate():
 
     await browser.close()
 
-
 def motivate_me():  # Use GPT-2 to generate and show a motivational text to convince you to proceed
     asyncio.run(motivate())
 
-
 ######################################################################
 # Misc
+
 def index_of(arr, start=0):
     return list(range(start, len(arr)))
-
 
 def invert_list(list):
     res = [0 for l in list]
@@ -123,6 +123,35 @@ def optimal_indices(arr, target):
             res.append(i)
 
     return res
+
+def sort_by(list_to_sort, value_function):
+    """sorts list, so that value_function evalueted by the list elements is in ascending order. So instead of sort_by(arr, foo)[i] < sort_by(arr, foo)[i+1] for all 0 <= i < len(arr), the returned list will forfill foo(sort_by(arr, foo)[i]) < foo(sort_by(arr, foo)[i+1]) for all such i."""
+    if len(list_to_sort) == 0:
+        return list_to_sort
+    pivot = value_function(list_to_sort[0])
+    l1 = [val for val in list_to_sort if value_function(val) < pivot]
+    l2 = [val for val in list_to_sort if value_function(val) > pivot]
+    if len(l1) > 1:
+        l1 = sort_by(l1, value_function)
+    if len(l2) > 1:
+        l2 = sort_by(l2, value_function)
+    return l1 + [val for val in list_to_sort if value_function(val) == pivot] + l2
+
+
+def read_value(path, var_name, seperator="=", use_error=True, error_notation="sigma_", allow_pm=True, pm_notation="\pm", linebreak="\n"):
+
+    inpt = open(path).read().split(var_name)[1].split(seperator)[1].split(linebreak)[0]
+    if not use_error:
+        return Val(inpt, "NaN")
+    if "\pm" in inpt:
+        inpt = inpt.split(pm_notation)[0]
+        err_inpt = inpt.split(pm_notation)[1]
+    else:
+        if error_notation + var_name in open(path).read():
+            err_inpt = open(path).read().split(error_notation + var_name)[1].split(seperator)[1].split(linebreak)[0]
+        else:
+            error_notation = "NaN"
+    return Val(inpt, err_inpt)
 
 #####################################################################
 # Datasets and Data-Handling
@@ -197,8 +226,6 @@ class Solvers:
             self.epsilon = Val(epsilon)
             self._old_recursion_limit = sys.getrecursionlimit()
 
-
-
         def evaluate(self, initial_guesses):
             if len(initial_guesses) >= self._old_recursion_limit:
                 sys.setrecursionlimit(self._old_recursion_limit + len(initial_guesses))
@@ -232,9 +259,16 @@ class Solvers:
         def __del__(self):
             sys.setrecursionlimit(self._old_recursion_limit)
 
-
 class Val:  # Todo: document!
 
+    @staticmethod
+    def sort_list(val_list, ascending=True):
+        for i in index_of(val_list)[1:]:
+            if (val_list[i] > val_list[i-1] and not ascending) or (val_list[i] < val_list[i-1] and ascending):
+                tmp = val_list[i-1]
+                val_list[i-1] = val_list[i]
+                val_list[i] = tmp
+                Val.sort_list(val_list)
     @property
     def v(self):
         return self._v
@@ -268,6 +302,16 @@ class Val:  # Todo: document!
 
     @staticmethod
     def weighted_mean(val_list=None):
+        """in case one of the vals has invalid error, this returns a val without error, that contains the (unweighted) mean"""
+        for val in val_list:
+            if not isinstance(val, Val):
+                return val
+            if val.e is None or val.e == 0 or mt.isnan(val.e):
+                res = Val("0", "0")
+                for val2 in val_list:
+                    res.v += val2.v
+                res.v /= len(val_list)
+                return res
         x_over_sig_sq = dc.Decimal(0)
         rez_sig_sq = dc.Decimal(0)
 
@@ -314,7 +358,12 @@ class Val:  # Todo: document!
     def __pow__(self, other):
         x = Var("x")
         y = Var("y")
-        return Formula([x, y], "x*y").at([[x, self], [y, other]], as_val=True)
+        return Formula([x, y], sympy=x.n**y.n).at([[x, self], [y, other]], as_val=True)
+
+    def __abs__(self):
+        x = cpy.deepcopy(self)
+        x.v = abs(x.v)
+        return x
 
     def get(self):
         return cpy.deepcopy(self.v)
@@ -397,7 +446,8 @@ class Val:  # Todo: document!
                 percent = mt.ceil(percent)
                 percent = str(percent) + " \cdot 10^{" + str(perc_pot) + "}"
 
-        return [str_val + " \\pm " + str_err + " \: (\\pm " + percent + "\\%)", str_val, str_err, percent]
+        ret = str_val + " \\pm " + str_err
+        return [ret + " \: (\\pm " + percent + "\\%)" if PRINT_OPTIONS["relative_uncertanties"] else ret, str_val, str_err, percent]
 
     def sigma_interval(self, true_value):
         if type(true_value) is Val:
@@ -406,7 +456,6 @@ class Val:  # Todo: document!
             true_value = dc.Decimal(true_value)
 
         return abs(true_value - self.v)/self.e
-
 
 class Var:
     n = ""
@@ -421,7 +470,6 @@ class Var:
 
     def __float__(self):
         return self.n
-
 
 class MatEx:
     @property
@@ -450,7 +498,6 @@ class MatEx:
             else:
                 self.variables[var.str] = var
         self.sympy = sympy if sympy is not None else (None if latex == "" else l2s2.latex2sympy(latex))
-
     def __str__(self):
         return self.latex
 
@@ -463,6 +510,23 @@ class MatEx:
             tmp_sympy = tmp_sympy.subs(var_val_pair[0], var_val_pair[1])
         return tmp_sympy
 
+    def clone(self):
+        return cpy.deepcopy(self)
+
+    def local_extrema(self, epsilon, x_variable=None, include_maxima=True, include_minima=True):
+        """epsilon describes the resolutoíon of the extrema: if the lowest difference between two minimal points is less than epsilon, they are considered the same and one is left out in the dataset to be returned"""
+        if x_variable is None:
+            x_variable = list(self.variables.values())[0]
+        if type(x_variable is not Var):
+            try:
+                x_variable = self.variables[x_variable]
+            except KeyError:
+                _error("ValueError", "Invalid x_varibale:" + str(x_variable) + "\nThere is no such variable in Expression:" + self.latex)
+                return -1
+        derivative = self.clone()
+        derivative.sympy = smp.Derivative(self.sympy, x_variable.n)
+        slv = Solvers.Root(derivative, epsilon)
+        return slv
 
 class Formula(MatEx):
 
@@ -477,7 +541,7 @@ class Formula(MatEx):
                 self.variables["\\sigma_{" + var + "}"] = Var('\\sigma_{' + var + '}')
         for key in self.variables.keys():
             if "\\sigma_{" not in key:
-                _err += (smp.Derivative(self.sympy, self.variables[key].n) * self.variables[
+                _err += (smp.Derivative(self.sympy, self.variables[key].n).doit(deep=False) * self.variables[
                     "\\sigma_{" + str(key)+"}"].n) ** 2
         self.error = MatEx(variables=list(list(self.variables.values())), sympy=smp.sympify(smp.sqrt(_err)))
 
@@ -515,7 +579,7 @@ class Formula(MatEx):
         for key in self.preset_variables.keys():
             frml.sympy = frml.sympy.subs(self.variables[key].n, self.preset_variables[key])
         for atom in frml.sympy.atoms(smp.Float):
-            frml.sympy = frml.sympy.subs(atom, smp.N(atom, 1))
+            frml.sympy = frml.sympy.subs(atom, smp.N(atom, 2))
 
         frml.sympy = smp.sympify(frml.sympy)
         try:
@@ -530,7 +594,6 @@ class Formula(MatEx):
         self.update_errors()
 
     def __init__(self, variables=None, latex="", sympy=None):
-
         self.preset_variables = {}
         self.error = None
         if variables is None:
@@ -543,7 +606,7 @@ class Formula(MatEx):
         ret_err = smp.sympify(ret_err)
         ret_err = smp.simplify(ret_err)
         for atom in ret_err.atoms(smp.Float):
-            ret_err = ret_err.subs(atom, smp.N(atom, 1))
+            ret_err = ret_err.subs(atom, smp.N(atom, 2))
 
         return self.latex[1:-1] + " \\pm " + smp.latex(ret_err)
 
@@ -615,8 +678,24 @@ class Formula(MatEx):
 
         return Dataset(dictionary=data)  # , r_names=[var, val_label]
 
-
 class Dataset:  # Object representing a full Dataset
+
+    def __str__(self):
+        max_rows = pd.get_option('display.max_rows')
+        max_cols = pd.get_option('display.max_columns')
+        max_col_width = pd.get_option('display.max_colwidth')
+        pd.set_option('display.max_rows', None)
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.max_colwidth', None)
+        res = str(self.frame)
+        pd.set_option('display.max_rows', max_rows)
+        pd.set_option('display.max_columns', max_cols)
+        pd.set_option('display.max_colwidth', max_col_width)
+        return res
+    def __add__(self, other):
+        cpy = self.clone()
+        cpy.join(other)
+        return cpy
 
     def __init__(self, x_label=None, y_label=None, dictionary=None, lists=None, csv_path=None, r_names=None,
                  c_names=None, val_err_index_pairs=None, title=None):
@@ -636,13 +715,14 @@ class Dataset:  # Object representing a full Dataset
 
         self.x_label = x_label
         self.y_label = y_label
+        self.frame.index = self.frame.index.astype(str, False)
 
     def row(self, index):
         try:
             res = self.frame.loc[index]
         except:
             res = self.frame.iloc[index]
-        return res
+        return list(res)
 
     def rename_rows(self, indices, new_names):
         name_dict = {}
@@ -666,18 +746,18 @@ class Dataset:  # Object representing a full Dataset
     def add_row(self, content):
         self.frame = pd.concat([self.frame, Dataset(lists=[[c] for c in content], c_names=self.get_col_names()).frame],
                                axis="index", ignore_index=True)
-
+        self.frame.index = self.frame.index.astype(str, False)
 
     def col(self, index):
-        try:
+        if type(index) is not int:
             res = self.frame[index]
-        except:
+        else:
             res = self.frame[self.get_col_names()[index]]
         return list(res)
 
     def at(self, r_index, c_index):
-        r_name = r_index if type(r_index) is not int else self.get_names([r_index, c_index])[0]
-        c_name = c_index if type(c_index) is not int else self.get_names([r_index, c_index])[1]
+        r_name = r_index if type(r_index) is not int else self.get_row_names()[r_index]
+        c_name = c_index if type(c_index) is not int else self.get_col_names()[c_index]
         return self.frame.at[r_name, c_name]
 
     def set(self, r_index, c_index, value):
@@ -735,11 +815,21 @@ class Dataset:  # Object representing a full Dataset
             pd.set_option('display.max_colwidth', max_col_width)
 
     def delete(self, c_indices=None, r_indices=None):
+        """deletes the rows described by row indices in the provided list r_indices. In the same way, this deletes the columns described by the column indices found in the provided list c_indices"""
         if c_indices is None:
             c_indices = []
 
         if r_indices is None:
             r_indices = []
+
+        if not type(r_indices) is list:
+            r_indices = [r_indices]
+
+        if not type(c_indices) is list:
+            c_indices = [c_indices]
+
+        if len(c_indices) == 0 and len(r_indices) == 0:
+            return
 
         c_names = []
         r_names = []
@@ -756,9 +846,11 @@ class Dataset:  # Object representing a full Dataset
             for r_index in r_indices:
                 r_names.append(r_index if type(r_index) is not int else self.get_row_names()[r_index])
 
+        r_names = sort_by(r_names, lambda val: len(self.get_row_names()) - self.get_row_names().index(val))
+        c_names = sort_by(c_names, lambda val: len(self.get_col_names()) - self.get_col_names().index(val))
+
         for r_name in r_names:
             self.frame.drop(index=r_name, inplace=True)
-
         for c_name in c_names:
             self.frame.drop(columns=c_name, inplace=True)
 
@@ -767,7 +859,8 @@ class Dataset:  # Object representing a full Dataset
         err_col = self.col(error_col_index)
 
         for i in index_of(err_col):
-            val_col[i].e = err_col[i].v
+            if isinstance(val_col[i], Val):
+                val_col[i].e = err_col[i].v
         self.delete(c_indices=error_col_index)
 
     def bind_errors(self, val_err_index_pairs):
@@ -799,6 +892,8 @@ class Dataset:  # Object representing a full Dataset
             self.frame = pd.DataFrame(data, r_names)
         else:
             self.frame = pd.DataFrame(data)
+
+        self.frame.index = self.frame.index.astype(str, False)
 
     def from_lists(self, lists, r_names=None, c_names=None, strict=False):
         if c_names is None:
@@ -855,6 +950,7 @@ class Dataset:  # Object representing a full Dataset
                     data[c_names[i]].append(lists[i][j])
 
         self.frame = pd.DataFrame(data, r_names)
+        self.frame.index = self.frame.index.astype(str, False)
 
     def from_csv(self, path, delimiter=None, c_names_from_row=0, c_names=None, indices_from_row=None, usecols=None,
                  userows=None, NaN_alias="NaN", compression=None, strict=False, modify_cols={}, modify_rows={}):
@@ -886,8 +982,10 @@ class Dataset:  # Object representing a full Dataset
         temp = temp.iloc[:, [col for col in usecols]]
         self.frame = temp.loc[userows]
         self.apply(lambda obj, r_index, c_index: Val.to_val(obj))
+        self.frame.index = self.frame.index.astype(str, False)
 
     def filter(self, c_index, filter_method):
+        """deletes every row from the dataset, for which the provided function filter_method returns True when called with the value in that row and the column described by c_index"""
         if type(c_index) is str:
             c_index = self.get_col_names().index(c_index)
         #if c_index <= len(self.col(c_index)):
@@ -899,10 +997,25 @@ class Dataset:  # Object representing a full Dataset
                 self.filter(c_index, filter_method)
                 break
 
-    def to_csv(self, path, delimiter=";", columns=None, show_index=False):
+    def to_csv(self, path, delimiter=";", columns=None, show_index=False, exact=True):
+        if exact:
+            for c_name in self.get_col_names():
+                self.add_column([(val.e if not mt.isnan(val.e) else "NaN") if isinstance(val, Val) else "NaN" for val in self.col(c_name)], "sigma_{" + c_name + "}")
+            self.apply(lambda val, r, c: val.v if isinstance(val, Val) else val)
         if columns is None:
             columns = self.get_col_names()
         self.frame.to_csv(path, sep=delimiter, index_label=self.x_label, columns=columns, index=show_index)
+
+    def auto_bind_errors(self, error_notaition = "sigma_{"):
+        for c_name in self.get_col_names():
+            for c2_name in self.get_col_names():
+                if error_notaition == "sigma_{":
+                    if "sigma_{" + c_name + "}" in c2_name or "sigma_" + c_name in c2_name or ("$" in c_name and ("sigma_{" + c_name.split("$")[1] + "}" in c2_name or "sigma_" + c_name.split("$")[1] in c2_name)):
+                        self.bind_error(c_name, c2_name)
+                else:
+                    if error_notaition + c2_name in c2_name or error_notaition + ("$" in c_name and error_notaition+c2_name.split("$")[1]):
+                        self.bind_error(c_name, c2_name)
+
 
     def to_latex(self, show_index=False):
 
@@ -928,6 +1041,134 @@ class Dataset:  # Object representing a full Dataset
         res.apply(lambda val, x, y: cpy.deepcopy(val))
         return res
 
+    def move_row(self, old_index, new_index):
+        tmp_rows = [self.row(old_index)]
+
+        if type(new_index) is not int:
+            new_index = self.get_row_names().index(new_index)
+        if type(old_index) is not int:
+            old_index = self.get_row_names().index(old_index)
+
+        row_names_to_shift = self.get_row_names()[new_index:]
+        for i in row_names_to_shift:
+            tmp_rows.append(self.row(i))
+
+        self.delete(r_indices=row_names_to_shift)
+        if not self.get_row_names()[old_index] in row_names_to_shift:
+            self.delete(r_indices=[old_index])
+
+        for tmp_row in tmp_rows:
+            self.add_row(tmp_row)
+
+    def sort(self, column_index, ascending=True):
+        indices = index_of(self.col(column_index))
+        indices = sort_by(indices, lambda val: self.col(column_index)[val].v)
+        new_ds = self.clone()
+        new_ds.delete(r_indices=self.get_row_names())
+        if not ascending:
+            invert_list(indices)
+        for i in indices:
+            new_ds.add_row(self.row(i))
+        self.frame = new_ds.frame
+
+    def local_extrema(self, y_index=1, x_index=0, include_maxima=True, include_minima=True, smoothing_radius=1, difference_radius=None, minimal_absolute_difference=0, minimal_relative_difference=0, minimal_difference_relative_to_biggest_absolute_extremum=0):
+        """smoothing radius defines, with how many neighboring values each potential extremum point is compared. minimal_absolute_difference and minimal_relative_difference are the required difference, a extremum has to have to another value in its difference_radius (absolute and relative to the extremums value)"""
+        if type(x_index) is not int:
+            x_index = self.get_col_names()[x_index]
+        if type(y_index) is not int:
+            y_index = self.get_col_names()[y_index]
+        if difference_radius is None:
+            difference_radius = len(self.col(y_index))
+        res = self.clone()
+        res.filter(y_index, lambda val: type(val) is not Val)
+        res.filter(x_index, lambda val: type(val) is not Val)
+
+        self.sort(x_index)
+        y_col = res.col(y_index)
+        delete_indices = []
+        biggest_absolute_extremum = max([abs(val.v) for val in y_col])
+        for i in index_of(y_col):
+            greatest_diff = 0
+            for k in range(1, smoothing_radius):
+                if include_minima and (i-k < 0 or y_col[i-k].v >= y_col[i].v) and (i+k > len(y_col[1:-1]) or y_col[i].v <= y_col[i+k].v):
+                    continue
+                if include_maxima and (i-k < 0 or y_col[i-k].v <= y_col[i].v) and (i+k > len(y_col[1:-1]) or y_col[i].v >= y_col[i+k].v):
+                    continue
+                delete_indices.append(i)
+                break
+            if i not in delete_indices:
+                for k in range(1, difference_radius):
+                    if i - k > 0 and abs(y_col[i - k].v - y_col[i].v) > greatest_diff:
+                        greatest_diff = abs(y_col[i - k].v - y_col[i].v)
+                    if i + k < len(y_col[1:-1]) and abs(y_col[i + k].v - y_col[i].v) > greatest_diff:
+                        greatest_diff = abs(y_col[i + k].v - y_col[i].v)
+                if greatest_diff < minimal_absolute_difference or greatest_diff < dc.Decimal(minimal_relative_difference) * y_col[i].v or greatest_diff < dc.Decimal(minimal_difference_relative_to_biggest_absolute_extremum) * biggest_absolute_extremum:
+                    delete_indices.append(i)
+
+        res.delete(r_indices=delete_indices)
+        return res
+
+    def join(self, other_ds):
+        for r_name in other_ds.get_row_names():
+            self.add_row(other_ds.row(r_name))
+
+    def delete_doubles(self, c_indices_to_check_for_doubles, epsilons, which_pick_method="mean", c_index_for_smallest_and_biggest=None):
+        """takes values that have the same value in c_indices_to_check_for_doubles columns (difference < epsilons[i] for the corresponding c_indices_to_check[i]) and deletes all but one of them """
+        if type(epsilons) is not list:
+            epsilons = [epsilons for i in c_indices_to_check_for_doubles]
+        equiv_classes = []
+        for i in index_of(self.get_row_names())[:-1]:
+            already_equiv = []
+            for equiv_class in equiv_classes:
+                already_equiv += equiv_class
+            if i in already_equiv:
+                continue
+            for k in index_of(self.get_row_names())[i+1:]:
+                r2 = self.get_row_names()[k]
+                is_double_index = True
+                for j in index_of(c_indices_to_check_for_doubles):
+                    c = c_indices_to_check_for_doubles[j]
+                    if abs(self.at(self.get_row_names()[i], c).v - self.at(r2, c).v) >= epsilons[j]:
+                        is_double_index = False
+                        break
+                if is_double_index:
+                    if len(equiv_classes) == 0 or i not in equiv_classes[-1]:
+                        equiv_classes.append([i])
+                    equiv_classes[-1].append(k)
+
+        del_indices = []
+        for equiv_class in equiv_classes:
+            if which_pick_method == "last":
+                del_indices += [ind for ind in equiv_class if ind not in del_indices][:-1]
+            elif which_pick_method == "first":
+                del_indices += [ind for ind in equiv_class if ind not in del_indices][1:]
+            elif which_pick_method == "none":
+                del_indices += [ind for ind in equiv_class if ind not in del_indices]
+            elif "smallest" in which_pick_method or "biggest" in which_pick_method:
+                if c_index_for_smallest_and_biggest is None:
+                    c_index_for_smallest_and_biggest = which_pick_method.split(" ")[1]
+                if "smallest" in which_pick_method:
+                    del_indices += [ind for ind in equiv_class if ind not in del_indices]
+                    equiv_class = [l for l in equiv_class if self.col(c_index_for_smallest_and_biggest)[l].v == min([self.col(c_index_for_smallest_and_biggest)[m].v for m in equiv_class])]
+                else:
+                    del_indices += [ind for ind in equiv_class if ind not in del_indices]
+                    equiv_class = [l for l in equiv_class if self.col(c_index_for_smallest_and_biggest)[l].v == max([self.col(c_index_for_smallest_and_biggest)[m].v for m in equiv_class])]
+            if which_pick_method == "weighted_mean" or "biggest" in which_pick_method or "smallest" in which_pick_method:
+                del_indices += [ind for ind in equiv_class if ind not in del_indices]
+                new_row = [Val(0) for i in self.get_col_names()]
+                for i in index_of(self.get_col_names()):
+                    new_row[i] = Val.weighted_mean([self.col(i)[l] for l in equiv_class])
+                self.add_row(new_row)
+        self.delete(r_indices=del_indices)
+
+    def sort_by(self, value_function, ascending=True):
+        """sorts to ascending value_function, where value_function gets row as array as only parameter"""
+        tmp_name = "__tmp__"
+        while tmp_name in self.get_col_names():
+            tmp_name += str(rndm.randint(0, 1000000000))
+        self.add_column([Val(value_function(self.row(name))) for name in self.get_row_names()], tmp_name)
+        self.sort(tmp_name, ascending)
+        self.delete(c_indices=[tmp_name])
 
 class Legend_Entry:
 
@@ -955,7 +1196,6 @@ class Legend_Entry:
     def __init__(self, name, color):
         self._label = name
         self.color = color
-
 
 class Legend:
     def __init__(self, location=None, entries=None):
@@ -987,7 +1227,6 @@ class Visualizers:
             self.fontsize = fontsize if fontsize is not None else plt.rcParams['font.size']
             self.color = color
             self.background_color = background_color if background_color is not None else [0, 0, 0, 0]
-
 
 class Plot:
 
@@ -1028,6 +1267,11 @@ class Plot:
         self._curve_colors = new_colors
 
     def update_plt(self):
+        self.fig, self.axes = plt.subplots(figsize=(12, 7.5))
+        self.axes.grid(which="major", linestyle="-", linewidth=1)
+        self.axes.grid(which="minor", linestyle=":", linewidth=0.75)
+        self.axes.xaxis.set_minor_locator(tck.AutoMinorLocator(4))
+        self.axes.yaxis.set_minor_locator(tck.AutoMinorLocator(4))
         plt.figure(self.fig)
         plt.xticks(fontsize=20)
         plt.yticks(fontsize=20)
@@ -1085,7 +1329,7 @@ class Plot:
 
     def show(self):
         self.update_plt()
-        plt.show()
+        self.fig.show()
 
     def save(self, path, dpi=None):
         self.update_plt()
@@ -1165,7 +1409,6 @@ class Plot:
             curve_dataset.x_label = self.x_label
             curve_dataset.y_label = self.y_label
 
-
 class Covariance_Matrix:
 
     def inverse(self, sigma_list):
@@ -1209,7 +1452,6 @@ class Covariance_Matrix:
 
         self.numpy = np.matrix(self._correlation_matrix)
 
-
 class Fit:
     @property
     def dataset(self):
@@ -1227,13 +1469,24 @@ class Fit:
         x_sqr_over_sig_sqr = dc.Decimal(0)
         x_y_over_sig_sqr = dc.Decimal(0)
         y_over_sig_sqr = dc.Decimal(0)
+        x_sum = dc.Decimal(0)
+        x_square_sum = dc.Decimal(0)
+        y_sum = dc.Decimal(0)
+        y_square_sum = dc.Decimal(0)
+        x_y_sum = dc.Decimal(0)
+
 
         for i in index_of(x):
-            one_over_sig_sqr += dc.Decimal(dc.Decimal(1) / y[i].e ** dc.Decimal(2))
-            x_sqr_over_sig_sqr += dc.Decimal(x[i].v ** 2 / y[i].e ** dc.Decimal(2))
-            x_over_sig_sqr += dc.Decimal(x[i].v / y[i].e ** dc.Decimal(2))
-            x_y_over_sig_sqr += dc.Decimal(x[i].v * y[i].v / y[i].e ** dc.Decimal(2))
-            y_over_sig_sqr += dc.Decimal(y[i].v / y[i].e ** dc.Decimal(2))
+            one_over_sig_sqr += dc.Decimal(1) / y[i].e ** dc.Decimal(2)
+            x_sqr_over_sig_sqr += x[i].v ** dc.Decimal(2) / y[i].e ** dc.Decimal(2)
+            x_over_sig_sqr += x[i].v / y[i].e ** dc.Decimal(2)
+            x_y_over_sig_sqr += x[i].v * y[i].v / y[i].e ** dc.Decimal(2)
+            y_over_sig_sqr += y[i].v / y[i].e ** dc.Decimal(2)
+            x_sum += x[i].v
+            y_sum += y[i].v
+            x_y_sum += x[i].v * y[i].v
+            x_square_sum += x[i].v**dc.Decimal(2)
+            y_square_sum += y[i].v**dc.Decimal(2)
 
         delta = dc.Decimal(one_over_sig_sqr * x_sqr_over_sig_sqr - x_over_sig_sqr ** dc.Decimal(2))
         m = Val(0)
@@ -1249,7 +1502,10 @@ class Fit:
         for i in index_of(x):
             chi_sqr.v += dc.Decimal((dc.Decimal(1) / y[i].e * (y[i].v - m.v * x[i].v - b.v)) ** dc.Decimal(2))
 
-        return m, b, chi_sqr
+        N = dc.Decimal(len(x))
+        corr = (N*x_y_sum - x_sum*y_sum)/((N*x_square_sum - x_sum**dc.Decimal(2)) * (N*y_square_sum - y_sum**dc.Decimal(2)))**dc.Decimal("0.5")
+        #corr is the pearson correlation coefficient as defined in Bevington: Error Analysis and Data Reduction for the physical sciences, p. 197f.
+        return m, b, chi_sqr, corr
 
     @staticmethod
     def _fit_chi_squared_untested_algebraic(x, y, formula, estimated_parameters, precision, x_variable, fit_variables,
@@ -1332,7 +1588,7 @@ class Fit:
             resulting_params[i] = Val(resulting_params[i], np.sqrt(np.diag(cov_mat))[i])
             return resulting_params, chi_squared, cov_mat
 
-    def k_fold(self, k, preset_folds=None):
+    def k_fold_cross_validation(self, k, preset_folds=None):
         if __debug_extended__:
             print("\n\nPERFORMING K-FOLD TO FORMULA:")
             print(self.formula.latex)
@@ -1385,6 +1641,7 @@ class Fit:
         CV /= k
 
         return {"CV": CV, "MSEs": mses, "folds": {'x_lists': x_lists, 'y_lists': y_lists}}
+
     @staticmethod
     def chi_squared(ds, formula, x_variable, x_index=0, y_index=1):
         y = ds.col(y_index)
@@ -1400,9 +1657,9 @@ class Fit:
 
     def update(self):
         if self.is_linear:
-            self.result["m"], self.result["b"], self.result["chi_squared"] = Fit.fit_linear(
+            self.result["m"], self.result["b"], self.result["chi_squared"], self.result["correlation_coefficient"] = Fit.fit_linear(
                 self.dataset.col(self.x_index), self.dataset.col(self.y_index))
-            self.result["reduced_chi_squared"]  = self.result["chi_squared"]/(len(self.dataset.col(self.x_index)) - 2)
+            self.result["reduced_chi_squared"] = self.result["chi_squared"]/(len(self.dataset.col(self.x_index)) - 2)
         else:
             params, chi_squared, cov_mat = self.fit_chi_squared(self.dataset.col(self.x_index),
                                                                 self.dataset.col(self.y_index), self.fit_formula,
@@ -1446,7 +1703,6 @@ class Fit:
         self.estimated_parameters = estimated_parameters
         self.bounds = bounds
         self.update()
-
 
 ###################################################################################################
 # Best motivateMe() texts:
