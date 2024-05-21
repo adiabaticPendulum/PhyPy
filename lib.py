@@ -8,7 +8,7 @@ DEC_DGTS = 64  # How many decimal digits (without rounding errors) shall be used
 ESC_STYLES = {"Error": '\033[41m\033[30m', "Error_txt": '\033[0m\033[31m', "Warning": '\033[43m\033[30m',
               "Warning_txt": '\033[0m\033[33m', "Default": '\033[0m', "Hacker_cliche": "\033[38;2;0;255;0m ", "Green_BG": '\033[42m\033[30m'}
 
-PRINT_OPTIONS = {"relative_uncertanties": True}
+PRINT_OPTIONS = {"relative_uncertanties": False}
 
 # Note: Appart from this, you have to install 'Jinja2' (e.g. using pip)
 import asyncio
@@ -125,6 +125,8 @@ def optimal_indices(arr, target):
     return res
 
 def sort_by(list_to_sort, value_function):
+    if sys.getrecursionlimit() < len(list_to_sort):
+        sys.setrecursionlimit(len(list_to_sort))
     """sorts list, so that value_function evalueted by the list elements is in ascending order. So instead of sort_by(arr, foo)[i] < sort_by(arr, foo)[i+1] for all 0 <= i < len(arr), the returned list will forfill foo(sort_by(arr, foo)[i]) < foo(sort_by(arr, foo)[i+1]) for all such i."""
     if len(list_to_sort) == 0:
         return list_to_sort
@@ -422,11 +424,12 @@ class Val:  # Todo: document!
             dec_pot -= 1
 
         err = mt.ceil(err)
-        str_err = str(err) + ("" if dec_pot == 0 else " \cdot 10^{" + str(dec_pot) + "}")
+        dec_string = ("" if dec_pot == 0 else " \cdot 10^{" + str(dec_pot) + "}")
+        str_err = str(err) + dec_string
 
         val *= dc.Decimal(10 ** -dec_pot)
         val = round(val)
-        str_val = str(val) + ("" if dec_pot == 0 else " \cdot 10^{" + str(dec_pot) + "}")
+        str_val = str(val) + dec_string
 
         if self.v == 0:
             percent = "NaN"
@@ -446,7 +449,7 @@ class Val:  # Todo: document!
                 percent = mt.ceil(percent)
                 percent = str(percent) + " \cdot 10^{" + str(perc_pot) + "}"
 
-        ret = str_val + " \\pm " + str_err
+        ret = "(" + str(val) + " \\pm " + str(err) + ")" + dec_string
         return [ret + " \: (\\pm " + percent + "\\%)" if PRINT_OPTIONS["relative_uncertanties"] else ret, str_val, str_err, percent]
 
     def sigma_interval(self, true_value):
@@ -472,6 +475,8 @@ class Var:
         return self.n
 
 class MatEx:
+
+    CONSTANTS = {"PI": (smp.Symbol("PI"), smp.pi), "EULER": (smp.Symbol("EULER"), smp.euler)}
     @property
     def sympy(self):
         return self._sympy
@@ -502,7 +507,8 @@ class MatEx:
         return self.latex
 
     def at(self, var_val_pairs):
-        tmp_sympy = self._sympy.doit()
+        tmp_sympy = cpy.deepcopy(self._sympy).doit()
+        tmp_sympy = self._substitute_constants(tmp_sympy)
         for var_val_pair in var_val_pairs:
             if isinstance(var_val_pair[0], Var):
                 var_val_pair[0] = var_val_pair[0].n
@@ -528,8 +534,13 @@ class MatEx:
         slv = Solvers.Root(derivative, epsilon)
         return slv
 
-class Formula(MatEx):
+    @staticmethod
+    def _substitute_constants(sympy):
+        for key in Formula.CONSTANTS.keys():
+            sympy = sympy.subs(MatEx.CONSTANTS[key][0], Formula.CONSTANTS[key][1])
+        return sympy
 
+class Formula(MatEx):
     @staticmethod
     def from_mat_ex(mat_ex):
         return Formula(variables=list(mat_ex.variables.keys()), sympy=mat_ex.sympy)
@@ -586,6 +597,8 @@ class Formula(MatEx):
             frml.sympy = smp.simplify(frml.sympy)
         except:
             pass
+
+        frml.sympy = MatEx._substitute_constants(frml.sympy)
         return "$" + frml._latex + "$"
 
     @latex.setter
@@ -613,6 +626,7 @@ class Formula(MatEx):
     def at(self, var_val_pairs, as_val=True):
         for variable in self.preset_variables.keys():
             var_val_pairs.append([self.variables[variable], self.preset_variables[variable]])
+
         for i in index_of(var_val_pairs):
             if isinstance(var_val_pairs[i][1], Val) and "\\sigma_{" not in var_val_pairs[i][0].str:
                 var_val_pairs.append([self.variables["\\sigma_{" + var_val_pairs[i][0].str + "}"], var_val_pairs[i][1].e])
@@ -663,11 +677,13 @@ class Formula(MatEx):
         err_label = "\sigma_{" + val_label + "}"
         data = {var: var_values, val_label: []}
         preset_sympy = self.sympy.subs(self.variables["\\sigma_{" + var + "}"].n, 0)
-        # for key in self.preset_variables.keys():
-        #     preset_sympy = preset_sympy.subs(self.variables[key].n, self.preset_variables[key])
         preset_err_sympy = self.error.sympy.subs(self.variables["\\sigma_{" + var + "}"].n, 0)
         for key in self.preset_variables.keys():
             preset_err_sympy.subs(self.variables[key].n, self.preset_variables[key])
+
+        preset_sympy = self._substitute_constants(preset_sympy)
+        preset_err_sympy = self._substitute_constants(preset_sympy)
+
         fast_val = smp.utilities.lambdify(self.variables[var].n, preset_sympy)
         fast_err = smp.utilities.lambdify(self.variables[var].n, preset_err_sympy)
         for var_val in var_values:
@@ -1061,8 +1077,9 @@ class Dataset:  # Object representing a full Dataset
             self.add_row(tmp_row)
 
     def sort(self, column_index, ascending=True):
-        indices = index_of(self.col(column_index))
-        indices = sort_by(indices, lambda val: self.col(column_index)[val].v)
+        col = self.col(column_index)
+        indices = index_of(col)
+        indices = sort_by(indices, lambda val: col[val]._v)
         new_ds = self.clone()
         new_ds.delete(r_indices=self.get_row_names())
         if not ascending:
@@ -1106,6 +1123,9 @@ class Dataset:  # Object representing a full Dataset
                     delete_indices.append(i)
 
         res.delete(r_indices=delete_indices)
+
+
+
         return res
 
     def join(self, other_ds):
@@ -1230,6 +1250,9 @@ class Visualizers:
 
 class Plot:
 
+    CURVES_TOKEN = "curves"
+    POINTS_TOKEN = "points"
+    VISUALIZERS_TOKEN = "visualizers"
     @staticmethod
     def generate_color(index):
         golden_ratio = (1 + mt.sqrt(5)) / 2
@@ -1266,19 +1289,7 @@ class Plot:
     def curve_colors(self, new_colors):
         self._curve_colors = new_colors
 
-    def update_plt(self):
-        self.fig, self.axes = plt.subplots(figsize=(12, 7.5))
-        self.axes.grid(which="major", linestyle="-", linewidth=1)
-        self.axes.grid(which="minor", linestyle=":", linewidth=0.75)
-        self.axes.xaxis.set_minor_locator(tck.AutoMinorLocator(4))
-        self.axes.yaxis.set_minor_locator(tck.AutoMinorLocator(4))
-        plt.figure(self.fig)
-        plt.xticks(fontsize=20)
-        plt.yticks(fontsize=20)
-
-        if type(self.sigma_interval) not in [tuple, list]:
-            self.sigma_interval = (self.sigma_interval, self.sigma_interval)
-
+    def _plot_curves(self):
         for i in index_of(self.curve_datasets):
             dataset = self.curve_datasets[i]
             if dataset is None:
@@ -1286,12 +1297,17 @@ class Plot:
             plt.plot([val.v for val in list(dataset.col(self.curve_column_index_pairs[i][0]))], [val.v for val in list(dataset.col(self.curve_column_index_pairs[i][1]))],
                      color=Plot.generate_color(i) if self.curve_colors[i] is None and dataset.plot_color is None else (self.curve_colors[i] if self.curve_colors[i] is not None else dataset.plot_color))
 
+    def _plot_visualizers(self):
         for vis in self.visualizers:
             if type(vis) is Visualizers.Dotted_line:
-                plt.plot([val.v for val in vis.dataset.col(vis.index_pair[0])], [val.v for val in vis.dataset.col(vis.index_pair[1])], color = vis.color, linestyle=vis.linestyle)
+                plt.plot([val.v for val in vis.dataset.col(vis.index_pair[0])],
+                         [val.v for val in vis.dataset.col(vis.index_pair[1])], color=vis.color,
+                         linestyle=vis.linestyle)
             if type(vis) is Visualizers.Text:
-                self.axes.text(vis.position[0], vis.position[1], vis.content, fontsize=vis.fontsize, horizontalalignment=vis.alignment, backgroundcolor=vis.background_color)
+                self.axes.text(vis.position[0], vis.position[1], vis.content, fontsize=vis.fontsize,
+                               horizontalalignment=vis.alignment, backgroundcolor=vis.background_color)
 
+    def _plot_points(self):
         for i in index_of(self.point_datasets):
             dataset = self.point_datasets[i]
             if dataset is None:
@@ -1307,6 +1323,27 @@ class Plot:
             if len(dataset.frame.columns) > 0:
                 plt.scatter([val.v for val in list(dataset.col(self.point_column_index_pairs[i][0]))], [val.v for val in list(dataset.col(self.point_column_index_pairs[i][1]))],
                             marker="x", color=Plot.generate_color(i) if self.point_colors[i] is None and dataset.plot_color is None else (self.point_colors[i] if self.point_colors[i] is not None else dataset.plot_color))
+
+    def update_plt(self):
+        self.fig, self.axes = plt.subplots(figsize=(12, 7.5))
+        self.axes.grid(which="major", linestyle="-", linewidth=1)
+        self.axes.grid(which="minor", linestyle=":", linewidth=0.75)
+        self.axes.xaxis.set_minor_locator(tck.AutoMinorLocator(4))
+        self.axes.yaxis.set_minor_locator(tck.AutoMinorLocator(4))
+        plt.figure(self.fig)
+        plt.xticks(fontsize=20)
+        plt.yticks(fontsize=20)
+
+        if type(self.sigma_interval) not in [tuple, list]:
+            self.sigma_interval = (self.sigma_interval, self.sigma_interval)
+
+        for instance in self.plotting_order:
+            if instance == self.CURVES_TOKEN:
+                self._plot_curves()
+            elif instance == self.POINTS_TOKEN:
+                self._plot_points()
+            elif instance == self.VISUALIZERS_TOKEN:
+                self._plot_visualizers()
 
         plt.title(self.title, fontsize=40)
 
@@ -1347,7 +1384,7 @@ class Plot:
     def add_curve(self, curve_dataset, new_column_index_pair=None, color=None):
         self.curve_datasets.append(curve_dataset)
         self.curve_column_index_pairs.append((0, 1) if new_column_index_pair is None else (new_column_index_pair[0] if new_column_index_pair[0] is not None else 0, new_column_index_pair[1] if new_column_index_pair[1] is not None else 1))
-        self.point_colors.append(color)
+        self.curve_colors.append(color)
         self.update_plt()
 
     def add_visualizers(self, new_visualizers):
@@ -1358,6 +1395,7 @@ class Plot:
     def update_legend(self):
         entries = [{"name": self.point_datasets[i].title,
                                        "color": Plot.generate_color(i) if self.point_datasets[i].plot_color is None else self.point_datasets[i].plot_color} for i in index_of(self.point_datasets)]
+        #TODO: USE self.cuvre_colors, self.point_colors!
         entries += [{"name": self.curve_datasets[i].title,
                                        "color": Plot.generate_color(i) if self.curve_datasets[i].plot_color is None else self.curve_datasets[i].plot_color} for i in index_of(self.curve_datasets)]
         self.legend = Legend(entries=entries)
@@ -1386,6 +1424,8 @@ class Plot:
         self.bounds = {"x": [None, None],
                   "y": [None, None]}
         self.visualizers = []
+
+        self.plotting_order = [self.CURVES_TOKEN, self.VISUALIZERS_TOKEN, self.POINTS_TOKEN]
 
         self.point_column_index_pairs = [[(0 if point_column_index_pairs is None or point_column_index_pairs[pcipi] is None or point_column_index_pairs[pcipi][0] is None else point_column_index_pairs[pcipi][0]), 1 if point_column_index_pairs is None or point_column_index_pairs[pcipi] is None or point_column_index_pairs[pcipi][1] is None else point_column_index_pairs[pcipi][1]] for pcipi in index_of(point_datasets)]
         self.curve_column_index_pairs = [[(0 if curve_column_index_pairs is None or curve_column_index_pairs[ccipi] is None or curve_column_index_pairs[ccipi][0] is None else curve_column_index_pairs[ccipi][0]), 1 if curve_column_index_pairs is None or curve_column_index_pairs[ccipi] is None or curve_column_index_pairs[ccipi][1] is None else curve_column_index_pairs[ccipi][1]] for ccipi in index_of(curve_datasets)]
