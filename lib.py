@@ -2,6 +2,8 @@
 __debug_lib__ = __debug__  # Weather to show warnings and debug info. Default: __debug__. Change this to False, if you want to hide the librarys internal debug information, even when you debug your application
 __debug_extended__ = False  # Weather to show internal debug info (mainly for debugging the library itself).
 
+import decimal
+
 DEC_DGTS = 64  # How many decimal digits (without rounding errors) shall be used.
 #################################################################################################
 # Init
@@ -476,7 +478,19 @@ class Var:
 
 class MatEx:
 
-    CONSTANTS = {"PI": (smp.Symbol("PI"), smp.pi), "EULER": (smp.Symbol("EULER"), smp.euler)}
+    constants = {"PI": (smp.Symbol("PI"), smp.pi), "EULER": (smp.Symbol("EULER"), smp.euler)}
+
+    @staticmethod
+    def define_constant(name, value, key=None):
+        if type(name) is str:
+            name = smp.Symbol(name)
+
+        if key is None:
+            key = str(name)
+
+        value = MatEx._substitute_constants(value)
+        MatEx.constants[key] = (name, value)
+
     @property
     def sympy(self):
         return self._sympy
@@ -485,7 +499,7 @@ class MatEx:
     def sympy(self, new_sympy):
         self._raw_sympy = new_sympy
         self._sympy = self._raw_sympy.doit()
-        self._latex = l2s2.latex(self._sympy)
+        self._latex = smp.latex(self._sympy)
 
     @property
     def latex(self):
@@ -508,12 +522,12 @@ class MatEx:
 
     def at(self, var_val_pairs):
         tmp_sympy = cpy.deepcopy(self._sympy).doit()
-        tmp_sympy = self._substitute_constants(tmp_sympy)
         for var_val_pair in var_val_pairs:
             if isinstance(var_val_pair[0], Var):
                 var_val_pair[0] = var_val_pair[0].n
 
             tmp_sympy = tmp_sympy.subs(var_val_pair[0], var_val_pair[1])
+        tmp_sympy = self._substitute_constants(tmp_sympy)
         return tmp_sympy
 
     def clone(self):
@@ -536,8 +550,8 @@ class MatEx:
 
     @staticmethod
     def _substitute_constants(sympy):
-        for key in Formula.CONSTANTS.keys():
-            sympy = sympy.subs(MatEx.CONSTANTS[key][0], Formula.CONSTANTS[key][1])
+        for key in MatEx.constants.keys():
+            sympy = sympy.subs(MatEx.constants[key][0], MatEx.constants[key][1])
         return sympy
 
 class Formula(MatEx):
@@ -598,7 +612,6 @@ class Formula(MatEx):
         except:
             pass
 
-        frml.sympy = MatEx._substitute_constants(frml.sympy)
         return "$" + frml._latex + "$"
 
     @latex.setter
@@ -633,7 +646,9 @@ class Formula(MatEx):
                 var_val_pairs[i][1] = var_val_pairs[i][1].v
 
         if as_val:
-            return Val(str(MatEx.at(self, var_val_pairs).evalf()), str(self.error.at(var_val_pairs).evalf()))
+            val = MatEx.at(self, var_val_pairs).evalf()
+            err = self.error.at(var_val_pairs).evalf()
+            return Val(str(val), str(err))
         if self.error is None:
             return MatEx.at(self, var_val_pairs), None
         return MatEx.at(self, var_val_pairs), self.error.at(var_val_pairs)
