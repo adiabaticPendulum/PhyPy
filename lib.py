@@ -62,7 +62,6 @@ plt.rcParams['errorbar.capsize'] = 5
 plt.rcParams['lines.markersize'] = 10
 
 
-
 ########################################################################################################
 # internal Functions
 
@@ -127,9 +126,11 @@ def optimal_indices(arr, target):
     return res
 
 def sort_by(list_to_sort, value_function):
+    if type(list_to_sort) is not list:
+        return list_to_sort
     if sys.getrecursionlimit() < len(list_to_sort):
         sys.setrecursionlimit(len(list_to_sort))
-    """sorts list, so that value_function evalueted by the list elements is in ascending order. So instead of sort_by(arr, foo)[i] < sort_by(arr, foo)[i+1] for all 0 <= i < len(arr), the returned list will forfill foo(sort_by(arr, foo)[i]) < foo(sort_by(arr, foo)[i+1]) for all such i."""
+    """sorts list, so that value_function evalueted by the list elements is in ascending order. So instead of sort_by(arr, foo)[i] < sort_by(arr, foo)[i+1] for all 0 <= i < len(arr) - 1, the returned list will forfill foo(sort_by(arr, foo)[i]) < foo(sort_by(arr, foo)[i+1]) for all such i."""
     if len(list_to_sort) == 0:
         return list_to_sort
     pivot = value_function(list_to_sort[0])
@@ -147,7 +148,7 @@ def read_value(path, var_name, seperator="=", use_error=True, error_notation="si
     inpt = open(path).read().split(var_name)[1].split(seperator)[1].split(linebreak)[0]
     if not use_error:
         return Val(inpt, "NaN")
-    if "\pm" in inpt:
+    if "\pm" in inpt and allow_pm:
         inpt = inpt.split(pm_notation)[0]
         err_inpt = inpt.split(pm_notation)[1]
     else:
@@ -156,6 +157,15 @@ def read_value(path, var_name, seperator="=", use_error=True, error_notation="si
         else:
             error_notation = "NaN"
     return Val(inpt, err_inpt)
+
+def dictionary_to_file(dictionary, file_path, seperator="=", linebreak="\n", error_notation="sigma_"):
+    file = open(file_path, "w")
+    for key in dictionary:
+        if isinstance(dictionary[key], Val):
+            file.write(str(key) + seperator + str(dictionary[key].v) + linebreak)
+            file.write(error_notation + str(key) + seperator + str(dictionary[key].e) + linebreak)
+        else:
+            file.write(str(key) + seperator + str(dictionary[key]))
 
 #####################################################################
 # Datasets and Data-Handling
@@ -268,7 +278,7 @@ class Val:  # Todo: document!
     @staticmethod
     def sort_list(val_list, ascending=True):
         for i in index_of(val_list)[1:]:
-            if (val_list[i] > val_list[i-1] and not ascending) or (val_list[i] < val_list[i-1] and ascending):
+            if (val_list[i].v > val_list[i-1].v and not ascending) or (val_list[i].v < val_list[i-1].v and ascending):
                 tmp = val_list[i-1]
                 val_list[i-1] = val_list[i]
                 val_list[i] = tmp
@@ -309,7 +319,7 @@ class Val:  # Todo: document!
         """in case one of the vals has invalid error, this returns a val without error, that contains the (unweighted) mean"""
         for val in val_list:
             if not isinstance(val, Val):
-                return val
+                return Val(np.mean(val_list))
             if val.e is None or val.e == 0 or mt.isnan(val.e):
                 res = Val("0", "0")
                 for val2 in val_list:
@@ -332,6 +342,13 @@ class Val:  # Todo: document!
         self._known_decimal_figures += 0 if "e" not in str(val) else (-int(str(val).split('e')[1]) - 1 - len(str(val).split('e')[1]))
         self._e_known_decimal_figures = 0 if "." not in str(err) else len(str(err).split('.')[1])
         self._e_known_decimal_figures += 0 if "e" not in str(err) else (-int(str(err).split('e')[1]) - 1 - len(str(err).split('e')[1]))
+
+    def __eq__(self, other):
+        if not isinstance(other, type(self)):
+            return False
+
+        return self.v == other.v and self.e == other.e
+
     def __str__(self):
         return self.sig_round(warn_for_bad_error=False)[0]
         # return str(self.v) if mt.isnan(self.e) or type(self.e) == str else self.sig_round()[0]
@@ -487,8 +504,6 @@ class MatEx:
 
         if key is None:
             key = str(name)
-
-        value = MatEx._substitute_constants(value)
         MatEx.constants[key] = (name, value)
 
     @property
@@ -527,6 +542,7 @@ class MatEx:
                 var_val_pair[0] = var_val_pair[0].n
 
             tmp_sympy = tmp_sympy.subs(var_val_pair[0], var_val_pair[1])
+
         tmp_sympy = self._substitute_constants(tmp_sympy)
         return tmp_sympy
 
@@ -550,8 +566,12 @@ class MatEx:
 
     @staticmethod
     def _substitute_constants(sympy):
+        initial_sympy = cpy.deepcopy(sympy)
         for key in MatEx.constants.keys():
             sympy = sympy.subs(MatEx.constants[key][0], MatEx.constants[key][1])
+
+        if sympy != initial_sympy:
+            sympy = MatEx._substitute_constants(sympy)
         return sympy
 
 class Formula(MatEx):
@@ -602,7 +622,8 @@ class Formula(MatEx):
         # in order to take into account preset variables
         frml = self.clone()
         for key in self.preset_variables.keys():
-            frml.sympy = frml.sympy.subs(self.variables[key].n, self.preset_variables[key])
+            frml.sympy = frml.sympy.subs(self.variables[key].n, self.preset_variables[key].v)
+
         for atom in frml.sympy.atoms(smp.Float):
             frml.sympy = frml.sympy.subs(atom, smp.N(atom, 2))
 
@@ -657,8 +678,8 @@ class Formula(MatEx):
         for var_val_pair in var_val_pairs:
             val = cpy.deepcopy(var_val_pair[1])
             val.e = dc.Decimal("NaN")
-            self.preset_variables[var_val_pair[0].str] = val.v
-            self.preset_variables["\\sigma_{" + var_val_pair[0].str + "}"] = var_val_pair[1].e
+            self.preset_variables[var_val_pair[0].str] = val
+            self.preset_variables["\\sigma_{" + var_val_pair[0].str + "}"] = Val(var_val_pair[1].e)
 
     def substitute_variables(self, var_formula_pairs):
         for pair in var_formula_pairs:
@@ -668,6 +689,12 @@ class Formula(MatEx):
                 self.variables[dict_entry[0]] = dict_entry[1]
             for dict_entry in pair[1].error.variables.items():
                 self.error.variables[dict_entry[0]] = dict_entry[1]
+
+            del self.variables[pair[0].str]
+            del self.error.variables[pair[0].str]
+            del self.error.variables["\\sigma_{" + pair[0].str + "}"]
+            del self.variables["\\sigma_{" + pair[0].str + "}"]
+
 
     def to_val(self, var_val_pairs):
         at = self.at(var_val_pairs, as_val=False)
@@ -702,6 +729,8 @@ class Formula(MatEx):
         fast_val = smp.utilities.lambdify(self.variables[var].n, preset_sympy)
         fast_err = smp.utilities.lambdify(self.variables[var].n, preset_err_sympy)
         for var_val in var_values:
+            if isinstance(var_val, Val):
+                var_val = float(var_val.v)
             val = Val(fast_val(var_val), str(fast_err(var_val)))
             if val.e == 0:
                 val.e = dc.Decimal("NaN")
@@ -898,6 +927,22 @@ class Dataset:  # Object representing a full Dataset
         for pair in val_err_index_pairs:
             self.bind_error(pair[0], pair[1])
 
+    def c_index_to_c_name(self, c_index):
+        if type(c_index) is int:
+            c_index = self.get_col_names()[c_index]
+        return c_index
+
+    def c_index_to_number(self, c_index):
+        if c_index in self.get_col_names():
+            c_index = self.get_col_names().index(c_index)
+        return c_index
+
+    def unbind_errors(self, c_indices):
+        for c_index in c_indices:
+            self.add_column([entry.e if isinstance(entry, Val) else None for entry in self.col(c_index)], "sigma_{" + str(self.c_index_to_c_name(c_index)) + "}")
+
+        self.apply(lambda val, r, c: val.v if isinstance(val, Val) else val, c_indices=c_indices)
+
     def from_dictionary(self, dictionary, r_names=None,
                         items=None):  # Initialize the Dataset with a Python dictionary. Parameters: dictionary: The dictionary of lists to read the data from. items (otional): Which items (lists) of the dictionary to use. Default is 'None', which will use all items.
         data = {}
@@ -1047,11 +1092,10 @@ class Dataset:  # Object representing a full Dataset
                     if error_notaition + c2_name in c2_name or error_notaition + ("$" in c_name and error_notaition+c2_name.split("$")[1]):
                         self.bind_error(c_name, c2_name)
 
-
-    def to_latex(self, show_index=False):
+    def to_latex(self, show_index=False, hline_all=False):
 
         ds = cpy.deepcopy(self)
-        ds.apply(lambda cell, row, col: "$" + str(cell) + "$")
+        ds.apply(lambda cell, row, col: "$" + str(cell) + "$" if isinstance(cell, Val) else cell)
         styler = sty.Styler(ds.frame)
         if not show_index:
             styler.hide(axis="index")
@@ -1063,8 +1107,13 @@ class Dataset:  # Object representing a full Dataset
         ltx = styler.to_latex(position_float="centering", label="tab:my_table", caption="\\todo{caption}",
                               column_format=col_frmt)
         ltx = ltx.replace("\\begin{tabular}{" + col_frmt + "}", "\\begin{tabular}{" + col_frmt + "}" + "\n\hline")
-        ltx = ltx.replace("\\\\", "\\\\ \hline", 1)
-        ltx = ltx.replace("\end{tabular}", "\hline\n\end{tabular}")
+
+        if hline_all:
+            ltx = ltx.replace("\\\\", "\\\\ \hline")
+            ltx = ltx.replace("\\\\ \hline", "\\\\ \\specialrule{0.08em}{0em}{0em}", 1)
+        else:
+            ltx = ltx.replace("\\\\", "\\\\ \hline", 1)
+            ltx = ltx.replace("\end{tabular}", "\hline\n\end{tabular}")
         return ltx
 
     def clone(self):
@@ -1242,7 +1291,7 @@ class Legend:
         if location is not None:
             self.location = location
         else:
-            self.location = "upper right"
+            self.location = "best"
 
 class Visualizers:
     class Dotted_line:
@@ -1309,45 +1358,75 @@ class Plot:
             dataset = self.curve_datasets[i]
             if dataset is None:
                 continue
-            plt.plot([val.v for val in list(dataset.col(self.curve_column_index_pairs[i][0]))], [val.v for val in list(dataset.col(self.curve_column_index_pairs[i][1]))],
+            x_list = [val.v if isinstance(val, Val) else val for val in list(dataset.col(self.curve_column_index_pairs[i][0]))]
+            y_list = [val.v if isinstance(val, Val) else val for val in list(dataset.col(self.curve_column_index_pairs[i][1]))]
+            self.axes.plot(x_list, y_list,
                      color=Plot.generate_color(i) if self.curve_colors[i] is None and dataset.plot_color is None else (self.curve_colors[i] if self.curve_colors[i] is not None else dataset.plot_color))
 
     def _plot_visualizers(self):
         for vis in self.visualizers:
             if type(vis) is Visualizers.Dotted_line:
-                plt.plot([val.v for val in vis.dataset.col(vis.index_pair[0])],
-                         [val.v for val in vis.dataset.col(vis.index_pair[1])], color=vis.color,
+                self.axes.plot([val.v if isinstance(val, Val) else val for val in vis.dataset.col(vis.index_pair[0])],
+                         [val.v if isinstance(val, Val) else val for val in vis.dataset.col(vis.index_pair[1])], color=vis.color,
                          linestyle=vis.linestyle)
             if type(vis) is Visualizers.Text:
-                self.axes.text(vis.position[0], vis.position[1], vis.content, fontsize=vis.fontsize,
+                self.axes.text(vis.position[0], vis.position[1], vis.content, fontsize=vis.fontsize, color=vis.color,
                                horizontalalignment=vis.alignment, backgroundcolor=vis.background_color)
+
+    def _plot_errors(self):
+        for i in index_of(self.point_datasets):
+            dataset = self.point_datasets[i]
+            if dataset is None:
+                continue
+            err_ds = dataset.clone()
+
+            def _fix_uncertainty(val, r, c):
+                if not isinstance(val, Val):
+                    return Val(str(val), "0")
+                elif mt.isnan(val.e) or val.e is None:
+                    val.e = 0
+                return val
+
+            err_ds.apply(_fix_uncertainty, c_indices=self.point_column_index_pairs[i])
+
+            #to not plot lines with missing errors instead, use:
+            #err_ds.filter(self.point_column_index_pairs[i][1], lambda val: not isinstance(val, Val) or mt.isnan(val.e) or val.e is None)
+            #err_ds.filter(self.point_column_index_pairs[i][0], lambda val: not isinstance(val, Val) or mt.isnan(val.e) or val.e is None)
+
+            if len(err_ds.frame.columns) > 0:
+                self.axes.errorbar(x=[val.v for val in list(err_ds.col(self.point_column_index_pairs[i][0]))], y=[val.v for val in list(err_ds.col(self.point_column_index_pairs[i][1]))],
+                             yerr=[self.sigma_interval[1] * val.e for val in list(err_ds.col(self.point_column_index_pairs[i][1]))],
+                             xerr=[self.sigma_interval[0] * val.e for val in list(err_ds.col(self.point_column_index_pairs[i][0]))],
+                             uplims=0, lolims=0, xlolims=0, xuplims=0,
+                             fmt='None', ecolor=Plot.generate_color(i) if self.point_colors[i] is None and dataset.plot_color is None else (self.point_colors[i] if self.point_colors[i] is not None else dataset.plot_color))
 
     def _plot_points(self):
         for i in index_of(self.point_datasets):
             dataset = self.point_datasets[i]
             if dataset is None:
                 continue
-            err_ds = dataset.clone()
-            err_ds.filter(1, lambda val: mt.isnan(val.e) or val.e is None)
-            if len(err_ds.frame.columns) > 0:
-                plt.errorbar(x=[val.v for val in list(err_ds.col(self.point_column_index_pairs[i][0]))], y=[val.v for val in list(err_ds.col(self.point_column_index_pairs[i][1]))],
-                             yerr=[self.sigma_interval[1] * val.e for val in list(err_ds.col(self.point_column_index_pairs[i][1]))],
-                             xerr=[self.sigma_interval[0] * val.e for val in list(err_ds.col(self.point_column_index_pairs[i][0]))],
-                             fmt='None', ecolor=Plot.generate_color(i) if self.point_colors[i] is None and dataset.plot_color is None else (self.point_colors[i] if self.point_colors[i] is not None else dataset.plot_color))
-
             if len(dataset.frame.columns) > 0:
-                plt.scatter([val.v for val in list(dataset.col(self.point_column_index_pairs[i][0]))], [val.v for val in list(dataset.col(self.point_column_index_pairs[i][1]))],
-                            marker="x", color=Plot.generate_color(i) if self.point_colors[i] is None and dataset.plot_color is None else (self.point_colors[i] if self.point_colors[i] is not None else dataset.plot_color))
+                if dataset.plot_color is not None:
+                    color = dataset.plot_color
+                elif self.point_colors[i] is not None:
+                    color = self.point_colors[i]
+                else:
+                    color = Plot.generate_color(i)
+                self.axes.scatter([val.v if isinstance(val, Val) else val for val in list(dataset.col(self.point_column_index_pairs[i][0]))], [val.v if isinstance(val, Val) else val for val in list(dataset.col(self.point_column_index_pairs[i][1]))],
+                            marker="x", color=color)
 
-    def update_plt(self):
-        self.fig, self.axes = plt.subplots(figsize=(12, 7.5))
+    def update_plt(self, update_axes=False):
+
+        if update_axes:
+            plt.clf()
+            self.fig, self.axes = plt.subplots(figsize=(12, 7.5))
+
         self.axes.grid(which="major", linestyle="-", linewidth=1)
         self.axes.grid(which="minor", linestyle=":", linewidth=0.75)
-        self.axes.xaxis.set_minor_locator(tck.AutoMinorLocator(4))
-        self.axes.yaxis.set_minor_locator(tck.AutoMinorLocator(4))
+        self.axes.xaxis.set_minor_locator(tck.AutoMinorLocator(5))
+        self.axes.yaxis.set_minor_locator(tck.AutoMinorLocator(5))
         plt.figure(self.fig)
-        plt.xticks(fontsize=20)
-        plt.yticks(fontsize=20)
+        self.axes.tick_params(axis="both", labelsize=20)
 
         if type(self.sigma_interval) not in [tuple, list]:
             self.sigma_interval = (self.sigma_interval, self.sigma_interval)
@@ -1357,30 +1436,34 @@ class Plot:
                 self._plot_curves()
             elif instance == self.POINTS_TOKEN:
                 self._plot_points()
+                self._plot_errors()
             elif instance == self.VISUALIZERS_TOKEN:
                 self._plot_visualizers()
 
-        plt.title(self.title, fontsize=40)
+        self.axes.set_title(self.title, fontsize=40)
 
         if self.x_label is not None:
-            plt.xlabel(self.x_label)
+            self.axes.set_xlabel(self.x_label)
         if self.y_label is not None:
-            plt.ylabel(self.y_label)
+            self.axes.set_ylabel(self.y_label)
 
         if len(self.legend.patches) > 0:
             self.axes.legend(loc=self.legend.location, handles=[entry.patch for entry in self.legend.patches], fontsize=18)
 
         if self.bounds["x"][0] is not None:
-            plt.xlim(left=self.bounds["x"][0])
+            self.axes.set_xlim(left=self.bounds["x"][0])
         if self.bounds["x"][1] is not None:
-            plt.xlim(right=self.bounds["x"][1])
+            self.axes.set_xlim(right=self.bounds["x"][1])
         if self.bounds["y"][0] is not None:
-            plt.ylim(bottom=self.bounds["y"][0])
+            self.axes.set_ylim(bottom=self.bounds["y"][0])
         if self.bounds["y"][1] is not None:
-            plt.ylim(top=self.bounds["y"][1])
+            self.axes.set_ylim(top=self.bounds["y"][1])
+        self.axes.set_axisbelow(True)
 
-    def show(self):
-        self.update_plt()
+    def show(self, auto_update=True):
+        if auto_update:
+            self.update_plt()
+
         self.fig.show()
 
     def save(self, path, dpi=None):
@@ -1392,7 +1475,7 @@ class Plot:
 
     def add_points(self, new_point_dataset, new_column_index_pair=None, color=None):
         self.point_datasets.append(new_point_dataset)
-        self.point_column_index_pairs.append((0, 1) if new_column_index_pair is None else (new_column_index_pair[0] if new_column_index_pair[0] is not None else 0, new_column_index_pair[1] if new_column_index_pair[1] is not None else 1))
+        self.point_column_index_pairs.append([0, 1] if new_column_index_pair is None else [new_column_index_pair[0] if new_column_index_pair[0] is not None else 0, new_column_index_pair[1] if new_column_index_pair[1] is not None else 1])
         self.point_colors.append(color)
         self.update_plt()
 
@@ -1407,6 +1490,17 @@ class Plot:
             self.visualizers.append(new_visualizers)
         else:
             self.visualizers += new_visualizers
+
+    def bounds_from_column(self, column_as_list, relative_margin_size=0.075, axis="x"):
+
+        if not axis in self.bounds.keys():
+            _error("keyError", "Specified axis is not a valid key of bounds dictionary. Use 'x' or 'y'. Got " + str(axis) + "instead.")
+
+        min_val = float(min([val.v if isinstance(val, Val) else float(val) for val in column_as_list]))
+        max_val = float(max([val.v if isinstance(val, Val) else float(val) for val in column_as_list]))
+        self.bounds[axis][0] = min_val - relative_margin_size * (max_val - min_val)
+        self.bounds[axis][1] = max_val + relative_margin_size * (max_val - min_val)
+
     def update_legend(self):
         entries = [{"name": self.point_datasets[i].title,
                                        "color": Plot.generate_color(i) if self.point_datasets[i].plot_color is None else self.point_datasets[i].plot_color} for i in index_of(self.point_datasets)]
@@ -1415,7 +1509,7 @@ class Plot:
                                        "color": Plot.generate_color(i) if self.curve_datasets[i].plot_color is None else self.curve_datasets[i].plot_color} for i in index_of(self.curve_datasets)]
         self.legend = Legend(entries=entries)
 
-    def __init__(self, point_datasets=None, curve_datasets=None, point_column_index_pairs=None, curve_column_index_pairs=None, title="Title", x_label=None, y_label=None):
+    def __init__(self, point_datasets=None, curve_datasets=None, point_column_index_pairs=None, curve_column_index_pairs=None, title="Title", x_label=None, y_label=None, fig=None, axes=None):
         if curve_datasets is None:
             curve_datasets = []
         if point_datasets is None:
@@ -1426,7 +1520,12 @@ class Plot:
         if type(curve_datasets) is Dataset:
             curve_datasets = [curve_datasets]
 
-        self.fig, self.axes = plt.subplots(figsize=(12, 7.5))
+        if fig is None or axes is None:
+            self.fig, self.axes = plt.subplots(figsize=(12, 7.5))
+        else:
+            self.fig = fig
+            self.axes = axes
+
         self.title = title
         self.axes.grid(which="major", linestyle="-", linewidth=1)
         self.axes.grid(which="minor", linestyle=":", linewidth=0.75)
@@ -1455,8 +1554,8 @@ class Plot:
         self.update_legend()
 
         # TODO:CHECK ALL LABELS
-        self.x_label = x_label if x_label is not None else (self.point_datasets[0].get_col_names()[self.point_column_index_pairs[0][0]] if len(self.point_datasets) > 0 else self.curve_datasets[0].get_col_names()[self.curve_column_index_pairs[0][0]])
-        self.y_label = y_label if y_label is not None else (self.point_datasets[0].get_col_names()[self.point_column_index_pairs[0][1]] if len(self.point_datasets) > 0 else self.curve_datasets[0].get_col_names()[self.curve_column_index_pairs[0][1]])
+        self.x_label = x_label if x_label is not None else (self.point_datasets[0].get_col_names()[self.point_column_index_pairs[0][0]] if len(self.point_datasets) > 0 else (self.curve_datasets[0].get_col_names()[self.curve_column_index_pairs[0][0]] if len(self.curve_datasets) > 0 else None))
+        self.y_label = y_label if y_label is not None else (self.point_datasets[0].get_col_names()[self.point_column_index_pairs[0][1]] if len(self.point_datasets) > 0 else (self.curve_datasets[0].get_col_names()[self.curve_column_index_pairs[0][1]] if len(self.curve_datasets) > 0 else None))
         for point_dataset in point_datasets:
             point_dataset.x_label = self.x_label
             point_dataset.y_label = self.y_label
@@ -1609,11 +1708,11 @@ class Fit:
         for variable in fit_variables:
             vars.append(variable.n)
         if estimated_parameters is None:
-            estimated_parameters = [1 for p in fit_variables]
+            estimated_parameters = [0 for p in fit_variables]
         if bounds is None:
             bounds = ([-mt.inf for p in fit_variables], [mt.inf for p in fit_variables])
 
-        diffs = [smp.utilities.lambdify(vars, smp.diff(formula.sympy, var)) for var in vars[1:]]
+        diffs = [smp.utilities.lambdify(vars, smp.diff(MatEx._substitute_constants(formula.sympy), var)) for var in vars[1:]]
         def jacobi(*args):
             res_list = []
             for x in args[0]:
@@ -1627,12 +1726,12 @@ class Fit:
             return res_list
 
         resulting_params, cov_mat, info_dict, mesg, ier = sp.optimize.curve_fit(
-            smp.utilities.lambdify(vars, formula.sympy), [x_val.v for x_val in x], [y_val.v for y_val in y],
+            smp.utilities.lambdify(vars, MatEx._substitute_constants(formula.sympy)), [x_val.v for x_val in x], [y_val.v for y_val in y],
             estimated_parameters, sigma=covariance_matrix, absolute_sigma=True, full_output=True, bounds=bounds, jac=jacobi, maxfev=1600)
 
         formula = cpy.deepcopy(formula)
-        formula.set_variables([[fit_variables[i], Val(resulting_params[i], np.sqrt(np.diag(cov_mat))[i])] for i in index_of(resulting_params)])
-
+        formula.set_variables([[fit_variables[i], Val(resulting_params[i], np.sqrt(np.diag(cov_mat))[i])] for i in
+                               index_of(resulting_params)])
         if output_formula_only:
             return formula
 
@@ -1685,9 +1784,10 @@ class Fit:
             for j in index_of(y_lists[i]):
                 mse += (y_lists[i][j].v - formula.at([[self.x_variable, x_lists[i][j]]]).v) ** 2
 
+            mse /= len(y_lists[i])
             if __debug_extended__:
                 print("GOT MSE", mse)
-            mses.append(mse / len(y_lists[i]))
+            mses.append(mse)
 
         CV = 0
         for i in range(k):
