@@ -1,3 +1,5 @@
+"""Example for fitting with the physicsLab library"""
+
 from lib import *
 import sympy as smp
 
@@ -19,5 +21,3 @@ fit = Fit(ds, is_linear=False, fit_formula=Formula([x, A, phi], sympy=A.n*smp.si
 plot = Plot(ds, frm.create_values([i * mt.pi / 500 for i in range(0, 1000)], var=x))
 plot.bounds["x"] = [0, 2 * mt.pi]
 plot.show()
-
-print(Dataset.delete.__doc__)

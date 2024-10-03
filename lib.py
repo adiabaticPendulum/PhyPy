@@ -2,15 +2,16 @@
 __debug_lib__ = __debug__  # Weather to show warnings and debug info. Default: __debug__. Change this to False, if you want to hide the librarys internal debug information, even when you debug your application
 __debug_extended__ = False  # Weather to show internal debug info (mainly for debugging the library itself).
 
-import decimal
-
 DEC_DGTS = 64  # How many decimal digits (without rounding errors) shall be used.
 #################################################################################################
 # Init
 ESC_STYLES = {"Error": '\033[41m\033[30m', "Error_txt": '\033[0m\033[31m', "Warning": '\033[43m\033[30m',
               "Warning_txt": '\033[0m\033[33m', "Default": '\033[0m', "Hacker_cliche": "\033[38;2;0;255;0m ", "Green_BG": '\033[42m\033[30m'}
 
-PRINT_OPTIONS = {"relative_uncertanties": False}
+PRINT_OPTIONS = {"relative_uncertainties": False}
+"""A dictionary containing flags that alter the output of some functions. Currently, there is only one option: 
+If `PRINT_OPTIONS[relative_uncertainties]` is set to `True`, relative uncertainties will be included in the output of some functions that print 'Val' objets, such as `Val.sig_round()`, e.g. "(2 \pm 10) \cdot 10^3 (\pm 20\percent)" instead of just ((2 \pm 10) \cdot 10^3). Default: `False`.
+"""
 
 # Note: Appart from this, you have to install 'Jinja2' (e.g. using pip)
 import asyncio
@@ -19,7 +20,6 @@ import math as mt
 import decimal as dc
 import copy as cpy
 import random as rndm
-import pyppeteer as pt
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tck
 import matplotlib.patches as ptc
@@ -31,7 +31,7 @@ import sympy as smp
 import scipy as sp
 import sys
 
-libs = [asyncio, cls, mt, pt, plt, np, pd, dc, cpy, l2s2, tck, smp, sp, sys, rndm]
+libs = [asyncio, cls, mt, plt, np, pd, dc, cpy, l2s2, tck, smp, sp, sys, rndm]
 
 if DEC_DGTS <= dc.MAX_PREC:
     dc.getcontext().prec = DEC_DGTS
@@ -77,28 +77,6 @@ def _error(name, description):
         ESC_STYLES["Default"] + ")\n\n\n")
     raise Exception(name + ": " + description)
 
-########################################################################################################
-# Fun
-async def motivate():
-    browser = await pt.launch(headless=True)
-    page = await browser.newPage()
-    await page.goto("https://deepai.org/machine-learning-model/text-generator")
-    await page.waitForSelector(selector=".qc-cmp2-summary-buttons")
-    await page.evaluate("document.querySelector('.qc-cmp2-summary-buttons').querySelectorAll('button')[1].click()")
-
-    prompt = "motivational text explaining that the physics laboratory courses are implemented badly, boring and exhausting. The text shall value and appreciate my previous progress on the corresponding lab report and assure me that I will manage to finish it soon."
-
-    fn = "()=>{document.querySelector('textarea.model-input-text-input').value = '" + prompt + "';document.querySelector('button#modelSubmitButton').click();console.log('done');}"
-    await page.evaluate(fn)
-    await page.waitForSelector('.try-it-result-area > div > pre')
-    fn = "document.querySelector('.try-it-result-area').querySelector('pre').innerText"
-    res = await page.evaluate(fn)
-    print(res)
-
-    await browser.close()
-
-def motivate_me():  # Use GPT-2 to generate and show a motivational text to convince you to proceed
-    asyncio.run(motivate())
 
 ######################################################################
 # Misc
@@ -274,6 +252,7 @@ class Solvers:
             sys.setrecursionlimit(self._old_recursion_limit)
 
 class Val:  # Todo: document!
+    """Class to store values with uncertainties."""
 
     @staticmethod
     def sort_list(val_list, ascending=True):
@@ -285,19 +264,24 @@ class Val:  # Todo: document!
                 Val.sort_list(val_list)
     @property
     def v(self):
+        """The (floating point) value of the Val"""
         return self._v
+
     @v.setter
     def v(self, new_v):
+        """The (floating point) value of the Val"""
         self._v = dc.Decimal(new_v)
         self._known_decimal_figures = 0 if "." not in str(new_v) else len(str(new_v).split('.')[1])
         self._known_decimal_figures += 0 if "e" not in str(new_v) else (-int(str(new_v).split('e')[1]) - 1 - len(str(new_v).split('e')[1]))
 
     @property
     def e(self):
+        """The (floating point) uncertainty of the Val"""
         return self._e
 
     @e.setter
     def e(self, new_e):
+        """The (floating point) uncertainty of the Val"""
         self._e = dc.Decimal(new_e)
         self._e_known_decimal_figures = 0 if "." not in str(new_e) else len(str(new_e).split('.')[1])
         self._e_known_decimal_figures += 0 if "e" not in str(new_e) else (
@@ -305,6 +289,14 @@ class Val:  # Todo: document!
 
     @staticmethod
     def to_val(val, modify=lambda val: val):
+        """Executes a callback function for a variable and returns the result as a Val object. If the callbacks return type can not be cast to Val, the original variable cast to a string will be returned instead.
+
+        Parameters:
+            - val: The variable to call modify for.
+            - modify: The callback function. Should take only one parameter, which should have the same type as val. Should return a Val object.
+
+        Returns:
+            A Val containing the return value of the callback or a string, if the callback has an incompatible return type"""
         if type(val) is Val:
             return modify(val)
         try:
@@ -316,7 +308,15 @@ class Val:  # Todo: document!
 
     @staticmethod
     def weighted_mean(val_list=None):
-        """in case one of the vals has invalid error, this returns a val without error, that contains the (unweighted) mean"""
+
+        """Calculates the weighted mean of a list of Val objects. If one of the Vals has an invalid error, the (unweighted) mean is returned as a Val object without error.
+
+        Parameters:
+            val_list: A list of Val objects. Default: None
+
+        Returns:
+            The weighted mean of val_list as a Val object or the (unweighted) mean if one or more members of val_list have an invalid uncertainty, such as 'NaN' or '0'.
+        """
         for val in val_list:
             if not isinstance(val, Val):
                 return Val(np.mean(val_list))
@@ -405,6 +405,20 @@ class Val:  # Todo: document!
                     -int(str(new_err).split('e')[1]) - 1 - len(str(new_err).split('e')[1]))
 
     def sig_round(self, sig_digits=1, additional_digit=True, warn_for_bad_error=True):
+        """Rounds the Val to a given number of significant digits.
+
+        Parameters:
+            sig_digits: The number of significant digits to round to. Should be of type int. Default: 1
+            additional_digit: Weather to round to an additional digit if the first additional digit is a 1 or a 2. Default: True
+            warn_for_bad_error: Weather to create a warning the Val has an invalid error, such as "NaN" or 0.
+
+        Returns:
+        A list with the following members (in that order):
+        - A string describing the value with the corresponding uncertainty in the format ([value] \pm [uncertainty]) \cdot 10^{[decimal exponent]}. If PRINT_OPTIONS["relative_uncertainties"] is True, the relative uncertainty will be printed as well: ([value] \pm [uncertainty]) \cdot 10^{[decimal exponent]} \: (\pm [relative uncertainty] \\%)
+        - A string describing the value
+        - A string describing the (absolute) uncertainty
+        - A string describing the relative uncertainty (in percent)
+        """
         val = self.get()
         err = self.get_err()
         if mt.isnan(err) or err <= 0:
@@ -469,9 +483,17 @@ class Val:  # Todo: document!
                 percent = str(percent) + " \cdot 10^{" + str(perc_pot) + "}"
 
         ret = "(" + str(val) + " \\pm " + str(err) + ")" + dec_string
-        return [ret + " \: (\\pm " + percent + "\\%)" if PRINT_OPTIONS["relative_uncertanties"] else ret, str_val, str_err, percent]
+        return [ret + " \: (\\pm " + percent + "\\%)" if PRINT_OPTIONS["relative_uncertainties"] else ret, str_val, str_err, percent]
 
     def sigma_interval(self, true_value):
+        """Returns the smallest sigma environment around a true value the `Val` is in.
+
+        **Parameters**:
+        - `true_value`: A float describing the true value.
+
+        **Returns**:
+        A float describing the offset of the true value and the `Val`s value as a fraction of the `Val`s uncertainty. E.g. `Val("1", "0.5").sigma_interval(3.25)` will yield `4.5` as $`\left|\frac{3.25 - 1}{0.5}\right| = 4.5`$.
+        """
         if type(true_value) is Val:
             true_value = true_value.v
         if type(true_value) is not dc.Decimal:
@@ -778,6 +800,13 @@ class Dataset:  # Object representing a full Dataset
         self.frame.index = self.frame.index.astype(str, False)
 
     def row(self, index):
+        """Returns the row at the given index.
+
+        **Parameters**:
+        - `index`: Which row to return The index can be either the integer index of the row or the row name.
+
+        **Returns**:
+        The row contents, cast to a list."""
         try:
             res = self.frame.loc[index]
         except:
@@ -1858,7 +1887,3 @@ class Fit:
         self.estimated_parameters = estimated_parameters
         self.bounds = bounds
         self.update()
-
-###################################################################################################
-# Best motivateMe() texts:
-# I understand that your physics laboratory courses may be draining and downright boring, but don't let these setbacks deter you from your goals. Your previous progress on the lab report was phenomenal, and that is a true testament to your intelligence and hardworking nature. Though the courses may not be implemented as efficiently as they should be, do not let this dull your passions. Remain focused and committed to your goals, and you will successfully complete the lab report in no time. Keep striving for greatness!
