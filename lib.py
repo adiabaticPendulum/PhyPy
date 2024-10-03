@@ -1282,6 +1282,528 @@ class Dataset:  # Object representing a full Dataset
         self.add_column([Val(value_function(self.row(name))) for name in self.get_row_names()], tmp_name)
         self.sort(tmp_name, ascending)
         self.delete(c_indices=[tmp_name])
+class Dataset:  # Object representing a full Dataset
+
+    def __str__(self):
+        max_rows = pd.get_option('display.max_rows')
+        max_cols = pd.get_option('display.max_columns')
+        max_col_width = pd.get_option('display.max_colwidth')
+        pd.set_option('display.max_rows', None)
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.max_colwidth', None)
+        res = str(self.frame)
+        pd.set_option('display.max_rows', max_rows)
+        pd.set_option('display.max_columns', max_cols)
+        pd.set_option('display.max_colwidth', max_col_width)
+        return res
+    def __add__(self, other):
+        cpy = self.clone()
+        cpy.join(other)
+        return cpy
+
+    def __init__(self, x_label=None, y_label=None, dictionary=None, lists=None, csv_path=None, r_names=None,
+                 c_names=None, val_err_index_pairs=None, title=None):
+        self.frame = pd.DataFrame()
+        self.title = title
+        self.plot_color = None
+        if val_err_index_pairs is None:
+            val_err_index_pairs = []
+        if dictionary is not None:
+            self.from_dictionary(dictionary, r_names)
+        elif lists is not None:
+            self.from_lists(lists, r_names, c_names)
+        elif csv_path is not None:
+            self.from_csv(csv_path)
+
+        self.bind_errors(val_err_index_pairs)
+
+        self.x_label = x_label
+        self.y_label = y_label
+        self.frame.index = self.frame.index.astype(str, False)
+
+    def row(self, index):
+        """Returns the row at the given index.
+
+        **Parameters**:
+        - `index`: Which row to return The index can be either the integer index of the row or the row name.
+
+        **Returns**:
+        The row contents, cast to a list."""
+        try:
+            res = self.frame.loc[index]
+        except:
+            res = self.frame.iloc[index]
+        return list(res)
+
+    def rename_rows(self, indices, new_names):
+        name_dict = {}
+        for i in index_of(indices):
+            name_dict[self.get_row_names()[indices[i]]] = new_names[i]
+        self.frame.rename(mapper=name_dict, inplace=True, axis="rows")
+
+    def rename_cols(self, indices, new_names):
+        name_dict = {}
+        for i in index_of(indices):
+            #name_dict[self.get_col_names()[indices[i]]] = new_names[i]
+            name_dict[indices[i] if type(indices[i]) is str else self.get_col_names()[indices[i]]] = new_names[i]
+
+        self.frame.rename(mapper=name_dict, inplace=True, axis="columns")
+
+    def add_column(self, content, name, index=None):
+        if index is None:
+            index = len(self.get_col_names())
+        self.frame.insert(loc=index, column=name, value=content)
+
+    def add_row(self, content):
+        self.frame = pd.concat([self.frame, Dataset(lists=[[c] for c in content], c_names=self.get_col_names()).frame],
+                               axis="index", ignore_index=True)
+        self.frame.index = self.frame.index.astype(str, False)
+
+    def col(self, index):
+        if type(index) is not int:
+            res = self.frame[index]
+        else:
+            res = self.frame[self.get_col_names()[index]]
+        return list(res)
+
+    def at(self, r_index, c_index):
+        r_name = r_index if type(r_index) is not int else self.get_row_names()[r_index]
+        c_name = c_index if type(c_index) is not int else self.get_col_names()[c_index]
+        return self.frame.at[r_name, c_name]
+
+    def set(self, r_index, c_index, value):
+        r_name = r_index if type(r_index) is not int else self.get_names([r_index, c_index])[0]
+        c_name = c_index if type(c_index) is not int else self.get_names([r_index, c_index])[1]
+        self.frame.at[r_name, c_name] = value
+
+    def disp_row(self, index):
+        print(self.row([index]))
+
+    def disp_col(self, index):
+        print(self.col([index]))
+
+    def get_names(self, location):
+        for i in index_of(location):
+            if type(location[i]) is not int:
+                location[i] = list(self.frame.columns).index(location[i])
+
+        return [self.frame.index[location[0]],
+                self.frame.columns[location[1]]]
+
+    def get_row_names(self):
+        return self.frame.index.to_list()
+
+    def get_col_names(self):
+        return self.frame.columns.to_list()
+
+    def apply(self, method, r_indices=None, c_indices=None):
+        if r_indices is None:
+            r_indices = index_of(self.get_row_names())
+        if c_indices is None:
+            c_indices = self.get_col_names()
+
+        if type(r_indices) is not list:
+            r_indices = [r_indices]
+        if type(c_indices) is not list:
+            c_indices = [c_indices]
+
+        for r_index in r_indices:
+            for c_index in c_indices:
+                self.set(r_index, c_index, method(self.at(r_index, c_index), r_index, c_index))
+
+    def print(self, extended=False):
+        if extended:
+            max_rows = pd.get_option('display.max_rows')
+            max_cols = pd.get_option('display.max_columns')
+            max_col_width = pd.get_option('display.max_colwidth')
+            pd.set_option('display.max_rows', None)
+            pd.set_option('display.max_columns', None)
+            pd.set_option('display.max_colwidth', None)
+        print(self.frame)
+        if extended:
+            pd.set_option('display.max_rows', max_rows)
+            pd.set_option('display.max_columns', max_cols)
+            pd.set_option('display.max_colwidth', max_col_width)
+
+    def delete(self, c_indices=None, r_indices=None):
+        """deletes the rows described by row indices in the provided list r_indices. In the same way, this deletes the columns described by the column indices found in the provided list c_indices"""
+        if c_indices is None:
+            c_indices = []
+
+        if r_indices is None:
+            r_indices = []
+
+        if not type(r_indices) is list:
+            r_indices = [r_indices]
+
+        if not type(c_indices) is list:
+            c_indices = [c_indices]
+
+        if len(c_indices) == 0 and len(r_indices) == 0:
+            return
+
+        c_names = []
+        r_names = []
+
+        if type(c_indices) is not list:
+            c_names.append(c_indices if type(c_indices) is not int else self.get_col_names()[c_indices])
+        else:
+            for c_index in c_indices:
+                c_names.append(c_index if type(c_index) is not int else self.get_col_names()[c_index])
+
+        if type(r_indices) is not list:
+            r_names.append(r_indices if type(r_indices) is not int else self.get_row_names()[r_indices])
+        else:
+            for r_index in r_indices:
+                r_names.append(r_index if type(r_index) is not int else self.get_row_names()[r_index])
+
+        r_names = sort_by(r_names, lambda val: len(self.get_row_names()) - self.get_row_names().index(val))
+        c_names = sort_by(c_names, lambda val: len(self.get_col_names()) - self.get_col_names().index(val))
+
+        for r_name in r_names:
+            self.frame.drop(index=r_name, inplace=True)
+        for c_name in c_names:
+            self.frame.drop(columns=c_name, inplace=True)
+
+    def bind_error(self, value_col_index, error_col_index):
+        val_col = self.col(value_col_index)
+        err_col = self.col(error_col_index)
+
+        for i in index_of(err_col):
+            if isinstance(val_col[i], Val):
+                val_col[i].e = err_col[i].v
+        self.delete(c_indices=error_col_index)
+
+    def bind_errors(self, val_err_index_pairs):
+        for pair in val_err_index_pairs:
+            self.bind_error(pair[0], pair[1])
+
+    def c_index_to_c_name(self, c_index):
+        if type(c_index) is int:
+            c_index = self.get_col_names()[c_index]
+        return c_index
+
+    def c_index_to_number(self, c_index):
+        if c_index in self.get_col_names():
+            c_index = self.get_col_names().index(c_index)
+        return c_index
+
+    def unbind_errors(self, c_indices):
+        for c_index in c_indices:
+            self.add_column([entry.e if isinstance(entry, Val) else None for entry in self.col(c_index)], "sigma_{" + str(self.c_index_to_c_name(c_index)) + "}")
+
+        self.apply(lambda val, r, c: val.v if isinstance(val, Val) else val, c_indices=c_indices)
+
+    def from_dictionary(self, dictionary, r_names=None,
+                        items=None):  # Initialize the Dataset with a Python dictionary. Parameters: dictionary: The dictionary of lists to read the data from. items (otional): Which items (lists) of the dictionary to use. Default is 'None', which will use all items.
+        data = {}
+        if items == None:
+            items = list(dictionary.keys())
+        if __debug_extended__:
+            print("Using items", items, "for creation")
+
+        if not isinstance(dictionary, dict):
+            _error("Type Error",
+                   "Parameter 'dictionary' must be of Type <class 'dict'>, but has type " + str(type(dictionary)))
+            return -1
+
+        for item in items:
+            data[item] = []
+            for val in dictionary[item]:
+                if not type(val) is Val:
+                    data[item].append(Val.to_val(val))
+                else:
+                    data[item].append(val)
+
+        if r_names is not None:
+            self.frame = pd.DataFrame(data, r_names)
+        else:
+            self.frame = pd.DataFrame(data)
+
+        self.frame.index = self.frame.index.astype(str, False)
+
+    def from_lists(self, lists, r_names=None, c_names=None, strict=False):
+        if c_names is None:
+            c_names = []
+
+        if r_names is None:
+            r_names = range(len(lists[0]))
+
+        if len(lists) != len(c_names):
+            if strict:
+                _error("Parameter Length Missmatch", "Parameters 'lists' and 'c_names' must have the same length but "
+                                                     "have shapes (" + str(len(lists)) + ") and ("
+                       + str(len(c_names)) + ").")
+                return -1
+            if __debug_lib__:
+                _warn("Parameter Length Missmatch", "Parameters 'lists' and 'c_names' must have the same length but "
+                                                    "have shapes (" + str(len(lists)) + ") and (" + str(len(c_names)) +
+                      "). Missing c_names will be initialized with standard indices, missing lists with all 'None'.")
+            while len(c_names) < len(lists):
+                c_names.append(len(c_names))
+            while len(lists) < len(c_names):
+                lists.append([None for i in lists[0]])
+        try:
+            data = {}
+            for i in index_of(c_names):
+                data[c_names[i]] = lists[i]
+            self.frame = pd.DataFrame(data)
+        except ValueError:
+            max_len = len(lists[0])
+            for i in index_of(lists, start=1):
+                if len(lists[i]) != len(lists[i - 1]):
+                    if strict:
+                        _error("ValueError",
+                               "All items in 'lists' must have same dimension, but items at Indices " + str(
+                                   i - 1) + " and " + str(i) + " have shapes (" + str(
+                                   len(lists[i - 1])) + ") and (" + str(len(lists[i])) + ").")
+                        return -1
+                    _warn("ValueWarning", "All items in 'lists' must have same dimension, but items at Indices " + str(
+                        i - 1) + " and " + str(i) + " have shapes (" + str(len(lists[i - 1])) + ") and (" + str(
+                        len(lists[i])) + "). Short items will be filled with 'NaN' of type dc.Decimal")
+                    max_len = np.max([len(lists[i]), len(lists[i - 1]), max_len])
+                    if __debug_extended__:
+                        print("Maximal detected list-length:", max_len)
+            for i in index_of(lists):
+                while len(lists[i]) < max_len:
+                    lists[i].append(dc.Decimal('NaN'))
+        data = {}
+        for i in index_of(c_names):
+            data[c_names[i]] = []
+            for j in index_of(lists[i]):
+                try:
+                    data[c_names[i]].append(Val.to_val(lists[i][j]))
+                except TypeError:
+                    data[c_names[i]].append(lists[i][j])
+
+        self.frame = pd.DataFrame(data, r_names)
+        self.frame.index = self.frame.index.astype(str, False)
+
+    def from_csv(self, path, delimiter=None, c_names_from_row=0, c_names=None, indices_from_row=None, usecols=None,
+                 userows=None, NaN_alias="NaN", compression=None, strict=False, modify_cols={}, modify_rows={}):
+        # TODO: TEST
+
+        temp = pd.read_csv(filepath_or_buffer=path, sep=delimiter, header=c_names_from_row, names=c_names,
+                           index_col=indices_from_row, na_values=NaN_alias, na_filter=True,
+                           verbose=__debug_extended__, compression=compression, quotechar="\"", comment="#",
+                           on_bad_lines='error' if strict else 'warn', dtype=object)
+
+        shp = temp.shape
+        for r in range(shp[0]):
+            for c in range(shp[1]):
+                temp.iloc[r].iloc[c] = Val.to_val(temp.iloc[r].iloc[c])
+
+        for k in modify_cols.keys():
+            for i in index_of(temp.get[k]):
+                temp.get[k][i] = modify_rows[k](temp.get[k][i])
+
+        for k in modify_rows.keys():
+            for i in index_of(temp.loc[k]):
+                temp.loc[k][i] = modify_rows[k](temp.loc[k][i])
+
+        if userows is None:
+            userows = range(shp[0])
+        if usecols is None:
+            usecols = range(shp[1])
+
+        temp = temp.iloc[:, [col for col in usecols]]
+        self.frame = temp.loc[userows]
+        self.apply(lambda obj, r_index, c_index: Val.to_val(obj))
+        self.frame.index = self.frame.index.astype(str, False)
+
+    def filter(self, c_index, filter_method):
+        """deletes every row from the dataset, for which the provided function filter_method returns True when called with the value in that row and the column described by c_index"""
+        if type(c_index) is str:
+            c_index = self.get_col_names().index(c_index)
+        #if c_index <= len(self.col(c_index)):
+            #return
+        col = list(self.col(c_index))
+        for i in index_of(col):
+            if filter_method(col[i]):
+                self.delete(r_indices=i)
+                self.filter(c_index, filter_method)
+                break
+
+    def to_csv(self, path, delimiter=";", columns=None, show_index=False, exact=True):
+        if exact:
+            for c_name in self.get_col_names():
+                self.add_column([(val.e if not mt.isnan(val.e) else "NaN") if isinstance(val, Val) else "NaN" for val in self.col(c_name)], "sigma_{" + c_name + "}")
+            self.apply(lambda val, r, c: val.v if isinstance(val, Val) else val)
+        if columns is None:
+            columns = self.get_col_names()
+        self.frame.to_csv(path, sep=delimiter, index_label=self.x_label, columns=columns, index=show_index)
+
+    def auto_bind_errors(self, error_notaition = "sigma_{"):
+        for c_name in self.get_col_names():
+            for c2_name in self.get_col_names():
+                if error_notaition == "sigma_{":
+                    if "sigma_{" + c_name + "}" in c2_name or "sigma_" + c_name in c2_name or ("$" in c_name and ("sigma_{" + c_name.split("$")[1] + "}" in c2_name or "sigma_" + c_name.split("$")[1] in c2_name)):
+                        self.bind_error(c_name, c2_name)
+                else:
+                    if error_notaition + c2_name in c2_name or error_notaition + ("$" in c_name and error_notaition+c2_name.split("$")[1]):
+                        self.bind_error(c_name, c2_name)
+
+    def to_latex(self, show_index=False, hline_all=False):
+
+        ds = cpy.deepcopy(self)
+        ds.apply(lambda cell, row, col: "$" + str(cell) + "$" if isinstance(cell, Val) else cell)
+        styler = sty.Styler(ds.frame)
+        if not show_index:
+            styler.hide(axis="index")
+
+        col_frmt = "|l|"
+        for col in self.get_col_names():
+            col_frmt += "l|"
+
+        ltx = styler.to_latex(position_float="centering", label="tab:my_table", caption="\\todo{caption}",
+                              column_format=col_frmt)
+        ltx = ltx.replace("\\begin{tabular}{" + col_frmt + "}", "\\begin{tabular}{" + col_frmt + "}" + "\n\hline")
+
+        if hline_all:
+            ltx = ltx.replace("\\\\", "\\\\ \hline")
+            ltx = ltx.replace("\\\\ \hline", "\\\\ \\specialrule{0.08em}{0em}{0em}", 1)
+        else:
+            ltx = ltx.replace("\\\\", "\\\\ \hline", 1)
+            ltx = ltx.replace("\end{tabular}", "\hline\n\end{tabular}")
+        return ltx
+
+    def clone(self):
+        res = cpy.deepcopy(self)
+        res.apply(lambda val, x, y: cpy.deepcopy(val))
+        return res
+
+    def move_row(self, old_index, new_index):
+        tmp_rows = [self.row(old_index)]
+
+        if type(new_index) is not int:
+            new_index = self.get_row_names().index(new_index)
+        if type(old_index) is not int:
+            old_index = self.get_row_names().index(old_index)
+
+        row_names_to_shift = self.get_row_names()[new_index:]
+        for i in row_names_to_shift:
+            tmp_rows.append(self.row(i))
+
+        self.delete(r_indices=row_names_to_shift)
+        if not self.get_row_names()[old_index] in row_names_to_shift:
+            self.delete(r_indices=[old_index])
+
+        for tmp_row in tmp_rows:
+            self.add_row(tmp_row)
+
+    def sort(self, column_index, ascending=True):
+        col = self.col(column_index)
+        indices = index_of(col)
+        indices = sort_by(indices, lambda val: col[val]._v)
+        new_ds = self.clone()
+        new_ds.delete(r_indices=self.get_row_names())
+        if not ascending:
+            invert_list(indices)
+        for i in indices:
+            new_ds.add_row(self.row(i))
+        self.frame = new_ds.frame
+
+    def local_extrema(self, y_index=1, x_index=0, include_maxima=True, include_minima=True, smoothing_radius=1, difference_radius=None, minimal_absolute_difference=0, minimal_relative_difference=0, minimal_difference_relative_to_biggest_absolute_extremum=0):
+        """smoothing radius defines, with how many neighboring values each potential extremum point is compared. minimal_absolute_difference and minimal_relative_difference are the required difference, a extremum has to have to another value in its difference_radius (absolute and relative to the extremums value)"""
+        if type(x_index) is not int:
+            x_index = self.get_col_names()[x_index]
+        if type(y_index) is not int:
+            y_index = self.get_col_names()[y_index]
+        if difference_radius is None:
+            difference_radius = len(self.col(y_index))
+        res = self.clone()
+        res.filter(y_index, lambda val: type(val) is not Val)
+        res.filter(x_index, lambda val: type(val) is not Val)
+
+        self.sort(x_index)
+        y_col = res.col(y_index)
+        delete_indices = []
+        biggest_absolute_extremum = max([abs(val.v) for val in y_col])
+        for i in index_of(y_col):
+            greatest_diff = 0
+            for k in range(1, smoothing_radius):
+                if include_minima and (i-k < 0 or y_col[i-k].v >= y_col[i].v) and (i+k > len(y_col[1:-1]) or y_col[i].v <= y_col[i+k].v):
+                    continue
+                if include_maxima and (i-k < 0 or y_col[i-k].v <= y_col[i].v) and (i+k > len(y_col[1:-1]) or y_col[i].v >= y_col[i+k].v):
+                    continue
+                delete_indices.append(i)
+                break
+            if i not in delete_indices:
+                for k in range(1, difference_radius):
+                    if i - k > 0 and abs(y_col[i - k].v - y_col[i].v) > greatest_diff:
+                        greatest_diff = abs(y_col[i - k].v - y_col[i].v)
+                    if i + k < len(y_col[1:-1]) and abs(y_col[i + k].v - y_col[i].v) > greatest_diff:
+                        greatest_diff = abs(y_col[i + k].v - y_col[i].v)
+                if greatest_diff < minimal_absolute_difference or greatest_diff < dc.Decimal(minimal_relative_difference) * y_col[i].v or greatest_diff < dc.Decimal(minimal_difference_relative_to_biggest_absolute_extremum) * biggest_absolute_extremum:
+                    delete_indices.append(i)
+
+        res.delete(r_indices=delete_indices)
+
+
+
+        return res
+
+    def join(self, other_ds):
+        for r_name in other_ds.get_row_names():
+            self.add_row(other_ds.row(r_name))
+
+    def delete_doubles(self, c_indices_to_check_for_doubles, epsilons, which_pick_method="mean", c_index_for_smallest_and_biggest=None):
+        """takes values that have the same value in c_indices_to_check_for_doubles columns (difference < epsilons[i] for the corresponding c_indices_to_check[i]) and deletes all but one of them """
+        if type(epsilons) is not list:
+            epsilons = [epsilons for i in c_indices_to_check_for_doubles]
+        equiv_classes = []
+        for i in index_of(self.get_row_names())[:-1]:
+            already_equiv = []
+            for equiv_class in equiv_classes:
+                already_equiv += equiv_class
+            if i in already_equiv:
+                continue
+            for k in index_of(self.get_row_names())[i+1:]:
+                r2 = self.get_row_names()[k]
+                is_double_index = True
+                for j in index_of(c_indices_to_check_for_doubles):
+                    c = c_indices_to_check_for_doubles[j]
+                    if abs(self.at(self.get_row_names()[i], c).v - self.at(r2, c).v) >= epsilons[j]:
+                        is_double_index = False
+                        break
+                if is_double_index:
+                    if len(equiv_classes) == 0 or i not in equiv_classes[-1]:
+                        equiv_classes.append([i])
+                    equiv_classes[-1].append(k)
+
+        del_indices = []
+        for equiv_class in equiv_classes:
+            if which_pick_method == "last":
+                del_indices += [ind for ind in equiv_class if ind not in del_indices][:-1]
+            elif which_pick_method == "first":
+                del_indices += [ind for ind in equiv_class if ind not in del_indices][1:]
+            elif which_pick_method == "none":
+                del_indices += [ind for ind in equiv_class if ind not in del_indices]
+            elif "smallest" in which_pick_method or "biggest" in which_pick_method:
+                if c_index_for_smallest_and_biggest is None:
+                    c_index_for_smallest_and_biggest = which_pick_method.split(" ")[1]
+                if "smallest" in which_pick_method:
+                    del_indices += [ind for ind in equiv_class if ind not in del_indices]
+                    equiv_class = [l for l in equiv_class if self.col(c_index_for_smallest_and_biggest)[l].v == min([self.col(c_index_for_smallest_and_biggest)[m].v for m in equiv_class])]
+                else:
+                    del_indices += [ind for ind in equiv_class if ind not in del_indices]
+                    equiv_class = [l for l in equiv_class if self.col(c_index_for_smallest_and_biggest)[l].v == max([self.col(c_index_for_smallest_and_biggest)[m].v for m in equiv_class])]
+            if which_pick_method == "weighted_mean" or "biggest" in which_pick_method or "smallest" in which_pick_method:
+                del_indices += [ind for ind in equiv_class if ind not in del_indices]
+                new_row = [Val(0) for i in self.get_col_names()]
+                for i in index_of(self.get_col_names()):
+                    new_row[i] = Val.weighted_mean([self.col(i)[l] for l in equiv_class])
+                self.add_row(new_row)
+        self.delete(r_indices=del_indices)
+
+    def sort_by(self, value_function, ascending=True):
+        """sorts to ascending value_function, where value_function gets row as array as only parameter"""
+        tmp_name = "__tmp__"
+        while tmp_name in self.get_col_names():
+            tmp_name += str(rndm.randint(0, 1000000000))
+        self.add_column([Val(value_function(self.row(name))) for name in self.get_row_names()], tmp_name)
+        self.sort(tmp_name, ascending)
+        self.delete(c_indices=[tmp_name])
 
 class Legend_Entry:
 
