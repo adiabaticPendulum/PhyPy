@@ -1,0 +1,3 @@
+n = 4
+sigma_n = 1
+pain_level = 4
